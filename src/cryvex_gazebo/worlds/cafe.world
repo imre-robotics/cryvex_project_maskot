@@ -1010,6 +1010,8 @@
       </link>
     </model>
     <!-- ~~~ Ceiling ~~~ -->
-    
+    <!-- (Yuruyen "musteri" actor'lari kaldirildi - dinamik engel davranisi
+         gercek robotta, ultrasonik + LiDAR ile ayarlanacak.) -->
+
   </world>
 </sdf>

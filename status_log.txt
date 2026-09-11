@@ -1,0 +1,28 @@
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---
+data: '{"state": "patrol", "waypoint": "Masa 1", "order": ""}'
+---

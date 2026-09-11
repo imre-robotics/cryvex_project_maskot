@@ -32,10 +32,16 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Robot, garson/barmen "Us" noktasinda dogar.
+    # (patrol.py HOME_POSITION / BARISTA_POS ve AMCL baslangic pozu ile ayni:
+    #  x=-3.43  y=4.05  yaw=0.40)
     spawn_entity = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
-        arguments=['-topic', 'robot_description', '-entity', 'cryvex'],
+        arguments=[
+            '-topic', 'robot_description', '-entity', 'cryvex',
+            '-x', '-3.43', '-y', '4.05', '-Y', '0.40',
+        ],
         output='screen'
     )
 

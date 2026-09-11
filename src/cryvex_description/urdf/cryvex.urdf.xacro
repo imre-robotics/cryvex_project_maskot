@@ -227,6 +227,59 @@
     </sensor>
   </gazebo>
 
+  <!-- ============ 4x HC-SR04 Ultrasonik (kurtulma manevrası için) ============ -->
+  <!-- Tabana köşelere, ~8 cm yükseğe. LiDAR'ın göremediği alçak engelleri (sandalye
+       ayağı, ayak) yakalar. 10 cm altında bir şey görünce patrol.py ters yöne kaçar.
+       ÖNEMLİ: FOV ±0.35 rad (~20°) genişletildi ve montaj açıları merkeze (±0.30 rad)
+       yaklaştırıldı ki ön-sol/ön-sağ sensörlerin arasında TAM ÖNDE kör nokta kalmasın -
+       önceki ±30° dar-huzmeli montajda robot bir masaya DÜZ yaklaşınca hiçbir sensör
+       onu görmüyordu (kör nokta), robot siyah noktaya kadar dayanıp kilitleniyordu. -->
+  <xacro:macro name="sonar" params="name x y yaw">
+    <joint name="sonar_${name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="sonar_${name}_link"/>
+      <origin xyz="${x} ${y} -0.02" rpy="0 0 ${yaw}"/>
+    </joint>
+    <link name="sonar_${name}_link">
+      <visual>
+        <geometry><box size="0.02 0.045 0.02"/></geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+    <gazebo reference="sonar_${name}_link">
+      <material>Gazebo/Black</material>
+      <sensor type="ray" name="sonar_${name}">
+        <pose>0 0 0 0 0 0</pose>
+        <visualize>true</visualize>
+        <update_rate>15</update_rate>
+        <ray>
+          <scan>
+            <horizontal><samples>11</samples><resolution>1</resolution>
+              <min_angle>-0.35</min_angle><max_angle>0.35</max_angle></horizontal>
+            <vertical><samples>5</samples><resolution>1</resolution>
+              <min_angle>-0.06</min_angle><max_angle>0.06</max_angle></vertical>
+          </scan>
+          <range><min>0.02</min><max>0.60</max><resolution>0.01</resolution></range>
+        </ray>
+        <plugin name="sonar_${name}_plugin" filename="libgazebo_ros_ray_sensor.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=ultrasonic/${name}</remapping>
+          </ros>
+          <output_type>sensor_msgs/Range</output_type>
+          <frame_name>sonar_${name}_link</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- FL(+17°) ve FR(-17°) huzmeleri (±20°) tam onde ust uste biner -> kor nokta yok.
+       Ayni mantik RL/RR ile tam arkada da gecerli. -->
+  <xacro:sonar name="fl" x="0.20"  y="0.13"  yaw="0.30"/>   <!-- ön-sol  ~+17° -->
+  <xacro:sonar name="fr" x="0.20"  y="-0.13" yaw="-0.30"/>  <!-- ön-sağ  ~-17° -->
+  <xacro:sonar name="rl" x="-0.20" y="0.13"  yaw="2.84"/>   <!-- arka-sol ~+163° -->
+  <xacro:sonar name="rr" x="-0.20" y="-0.13" yaw="-2.84"/>  <!-- arka-sağ ~-163° -->
+
   <!-- Kamera (Tablet Üzeri) -->
   <joint name="camera_joint" type="fixed">
     <parent link="body_link"/>
