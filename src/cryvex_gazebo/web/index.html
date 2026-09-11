@@ -165,6 +165,17 @@
                 0 0 40px rgba(0, 229, 255, 0.08),
                 0 8px 32px rgba(0, 0, 0, 0.3);
             transition: height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.4s ease;
+            animation: eye-glow-breathe 5.3s ease-in-out infinite;
+        }
+        @keyframes eye-glow-breathe {
+            0%, 100% {
+                box-shadow: inset 0 -4px 12px rgba(0, 0, 0, 0.08),
+                    0 0 40px rgba(0, 229, 255, 0.08), 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+            50% {
+                box-shadow: inset 0 -4px 12px rgba(0, 0, 0, 0.08),
+                    0 0 56px rgba(0, 229, 255, 0.16), 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
         }
         .iris {
             width: 62%; height: 62%; border-radius: 50%;
@@ -181,6 +192,11 @@
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             transition: width 0.3s, height 0.3s;
+            animation: pupil-breathe 4.6s ease-in-out infinite;  /* hafif nefes alma hissi */
+        }
+        @keyframes pupil-breathe {
+            0%, 100% { width: 44%; height: 44%; }
+            50%      { width: 40%; height: 40%; }
         }
         .reflection { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, 0.92); pointer-events: none; }
         .reflection.r1 { width: 28%; height: 28%; top: 14%; left: 18%; filter: blur(0.5px); }
@@ -189,6 +205,7 @@
         .eyelid.top { top: 0; transform: translateY(-100%); border-radius: 0 0 50% 50%; }
         .eyelid.bottom { bottom: 0; transform: translateY(100%); border-radius: 50% 50% 0 0; }
         .eye.blink .eyelid.top, .eye.blink .eyelid.bottom { transform: translateY(-5%); transition: transform 0.08s ease-out; }
+        .eye.blink-slow .eyelid.top, .eye.blink-slow .eyelid.bottom { transform: translateY(-5%); transition: transform 0.18s ease-in-out; }
         .eye.closed .eyelid.top, .eye.closed .eyelid.bottom { transform: translateY(-5%); transition: transform 0.4s ease; }
         .eyes-wrapper.happy .eye { height: clamp(80px, 16vmin, 150px); border-radius: 50% 50% 50% 50% / 70% 70% 30% 30%; }
         .eyes-wrapper.alert .eye { height: clamp(130px, 28vmin, 250px); }
@@ -352,6 +369,29 @@
         }
         .keypad button:active { background: rgba(0,229,255,0.15); transform: scale(0.95); }
 
+        /* ---------- ORTAMI HARİTALA (operatör, canlı SLAM + joystick) ---------- */
+        .map-frame {
+            position: relative; width: 100%; aspect-ratio: 4/3; border-radius: 16px;
+            overflow: hidden; background: #000; border: 1px solid var(--card-line);
+            display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+        }
+        .map-frame img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+        .map-frame .map-placeholder { position: absolute; color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 20px; }
+        .joy-wrap { display: flex; justify-content: center; padding: 4px 0 16px; }
+        .joy-base {
+            position: relative; width: 190px; height: 190px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,229,255,0.08), rgba(255,255,255,0.03));
+            border: 1px solid var(--card-line); touch-action: none;
+        }
+        .joy-knob {
+            position: absolute; width: 74px; height: 74px; border-radius: 50%;
+            left: 50%; top: 50%; transform: translate(-50%, -50%);
+            background: radial-gradient(circle at 35% 30%, #1a2540, #0a1020);
+            border: 2px solid var(--accent-cyan); box-shadow: 0 0 18px rgba(0,229,255,0.35);
+            pointer-events: none;
+        }
+        .mapping-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
         /* ---------- MESAJ FORM ALANLARI ---------- */
         .compose-panel { max-height: 96vh; overflow-y: auto; padding-top: 0; }
         .compose-topbar {
@@ -459,6 +499,7 @@
             box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.45);
             max-height: 88vh;
             display: flex; flex-direction: column;
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
         }
         .overlay.active .panel-bottom { transform: translateY(0); }
         .panel-handle { width: 40px; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.15); margin: 0 auto 2vh; flex-shrink: 0; }
@@ -698,7 +739,7 @@
                 <span class="status-text" id="status-text">Hazır</span>
             </div>
         </div>
-        <div class="build-tag">arayüz 2026-09-11g</div>
+        <div class="build-tag">arayüz 2026-09-11j</div>
 
         <div class="corner-btns">
             <div class="corner-btn" id="btn-open-msg" aria-label="Mesajlaşma">
@@ -733,6 +774,8 @@
                 <button class="btn btn-cyan" id="btn-wander"><span class="btn-icon">🎈</span> Sosyalleşme (Gezinme)</button>
                 <button class="btn btn-cyan" id="btn-go-home"><span class="btn-icon">🏠</span> Üsse Dön</button>
                 <button class="btn btn-red" id="btn-stop-patrol"><span class="btn-icon">🔒</span> Devriyeyi Durdur</button>
+                <button class="btn btn-cyan" id="btn-open-mapping"><span class="btn-icon">🗺️</span> Ortamı Haritala</button>
+                <a class="btn btn-gray" href="/setup" style="text-decoration:none; box-sizing:border-box;"><span class="btn-icon">📍</span> Kurulum Ekranı (Masa/Kapı Noktaları)</a>
                 <button class="btn btn-gray close-manager"><span class="btn-icon">✕</span> Kapat</button>
             </div>
         </div>
@@ -744,13 +787,34 @@
         <div class="panel-bottom">
             <div class="panel-handle"></div>
             <h2 class="panel-title">🔒 Şifre Gerekli</h2>
-            <p class="panel-sub">Devriyeyi durdurmak için 4 haneli şifre</p>
+            <p class="panel-sub" id="pass-sub">Devriyeyi durdurmak için 4 haneli şifre</p>
             <div class="pass-dots" id="pass-dots"><i></i><i></i><i></i><i></i></div>
             <div class="keypad" id="keypad">
                 <button>1</button><button>2</button><button>3</button>
                 <button>4</button><button>5</button><button>6</button>
                 <button>7</button><button>8</button><button>9</button>
                 <button data-k="clear">✕</button><button>0</button><button data-k="del">⌫</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ORTAMI HARİTALA ============ -->
+    <div class="overlay" id="overlay-mapping">
+        <div class="backdrop" id="mapping-backdrop"></div>
+        <div class="panel-bottom">
+            <div class="panel-handle"></div>
+            <h2 class="panel-title">🗺️ Ortamı Haritala</h2>
+            <p class="panel-sub">Robotu joystick ile sürüp haritayı çıkarın</p>
+            <div class="map-frame">
+                <img id="live-map" hidden>
+                <div class="map-placeholder" id="map-placeholder">Harita oluşturuluyor... robotu sürmeye başlayın, birazdan burada görünecek.</div>
+            </div>
+            <div class="joy-wrap">
+                <div class="joy-base" id="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
+            </div>
+            <div class="mapping-actions">
+                <button class="btn btn-gray" id="btn-cancel-mapping"><span class="btn-icon">✕</span> Vazgeç</button>
+                <button class="btn btn-green" id="btn-finish-mapping"><span class="btn-icon">✓</span> Bitir</button>
             </div>
         </div>
     </div>
@@ -849,6 +913,7 @@
         let lastRemoteSpeakAt = 0;
         let lastScreenOn = false;
         let powering = false;
+        let latestMapReady = true;   // false = kurulum/haritalama sürüyor, devriye komutları kilitli
 
         // Wander & Greet pazarlama replikleri (gezinme duraklarında rastgele okunur)
         const GREET_LINES = [
@@ -906,6 +971,7 @@
         const overlayOrder   = $('overlay-order');
         const overlayBarista = $('overlay-barista');
         const overlayPass    = $('overlay-pass');
+        const overlayMapping = $('overlay-mapping');
         const overlayCompose = $('overlay-compose');
         const msgView        = $('msg-view');
         const statusDot    = $('status-dot');
@@ -1002,17 +1068,19 @@
         $('power-btn').addEventListener('click', powerOn);
 
         // ==================== EYE ANIMATIONS ====================
-        function blink() {
-            eyeLeft.classList.add('blink'); eyeRight.classList.add('blink');
-            setTimeout(() => { eyeLeft.classList.remove('blink'); eyeRight.classList.remove('blink'); }, 130);
+        function blink(slow) {
+            const cls = slow ? 'blink-slow' : 'blink';
+            eyeLeft.classList.add(cls); eyeRight.classList.add(cls);
+            setTimeout(() => { eyeLeft.classList.remove(cls); eyeRight.classList.remove(cls); }, slow ? 260 : 130);
         }
         function startBlinking() {
             (function schedule() {
                 setTimeout(() => {
-                    blink();
-                    if (Math.random() < 0.2) setTimeout(blink, 280);
+                    const r = Math.random();
+                    if (r < 0.10) blink(true);              // rahat/yavaş kırpma
+                    else { blink(); if (r > 0.75) setTimeout(() => blink(), 260); }  // hızlı çift kırpma
                     schedule();
-                }, 2500 + Math.random() * 4000);
+                }, 2200 + Math.random() * 3200);
             })();
         }
         function moveEyes(dx, dy) {
@@ -1041,13 +1109,19 @@
 
         // ==================== OVERLAYS ====================
         function openOverlay(el) {
-            if (overlayOpen && overlayOpen !== el) overlayOpen.classList.remove('active');
+            if (overlayOpen && overlayOpen !== el) {
+                overlayOpen.classList.remove('active');
+                if (overlayOpen.id === 'overlay-mapping') leaveMappingView();
+            }
             el.classList.add('active');
             overlayOpen = el;
             eyesWrapper.classList.add('nudge-up');
         }
         function closeOverlay() {
-            if (overlayOpen) overlayOpen.classList.remove('active');
+            if (overlayOpen) {
+                overlayOpen.classList.remove('active');
+                if (overlayOpen.id === 'overlay-mapping') leaveMappingView();
+            }
             overlayOpen = null;
             eyesWrapper.classList.remove('nudge-up');
         }
@@ -1066,27 +1140,53 @@
         }
 
         // ==================== MANAGER ACTIONS ====================
+        // Kurulum/haritalama sürerken (operatör ekranı) bu komutlar kilitli -
+        // patrol.py zaten reddediyor ama arayüzde de net bir uyarı verelim.
+        function requireMapReady() {
+            if (!latestMapReady) {
+                showToast('⚠ Kurulum/haritalama sürüyor, önce "Ortamı Haritala" akışını bitirin.');
+                closeOverlay();
+                return false;
+            }
+            return true;
+        }
         $('btn-start-patrol').addEventListener('click', () => {
+            if (!requireMapReady()) return;
             apiCall('/api/start_patrol'); closeOverlay();
             showToast('Devriye başlatılıyor…');
             setExpression('alert', 2000);
         });
         $('btn-greet-door').addEventListener('click', () => {
+            if (!requireMapReady()) return;
             apiCall('/api/greet_door'); closeOverlay();
             showToast('Kapıda karşılama (3 dk)');
             setExpression('love', 2000);
         });
         $('btn-wander').addEventListener('click', () => {
+            if (!requireMapReady()) return;
             apiCall('/api/wander'); closeOverlay();
             showToast('Sosyalleşme (gezinme) modu');
             setExpression('happy', 2000);
         });
         $('btn-go-home').addEventListener('click', () => {
+            if (!requireMapReady()) return;
             apiCall('/api/go_home'); closeOverlay();
             showToast('Üsse dönülüyor…');
         });
-        // Durdur -> şifre (1234)
-        $('btn-stop-patrol').addEventListener('click', () => { openOverlay(overlayPass); passReset(); });
+        // Sifre ekrani BIRDEN FAZLA eylem icin kullanilir (Durdur / Ortami Haritala) -
+        // hangisi oldugunu passAction tutar, dogru sifre girilince ona gore calisir.
+        let passAction = 'stop';
+        const PASS_SUB = {
+            stop: 'Devriyeyi durdurmak için 4 haneli şifre',
+            start_mapping: 'Haritalamayı başlatmak için 4 haneli şifre',
+        };
+        function openPassFor(action) {
+            passAction = action;
+            $('pass-sub').textContent = PASS_SUB[action] || PASS_SUB.stop;
+            openOverlay(overlayPass); passReset();
+        }
+        $('btn-stop-patrol').addEventListener('click', () => openPassFor('stop'));
+        $('btn-open-mapping').addEventListener('click', () => openPassFor('start_mapping'));
 
         let passBuf = '';
         function passReset() { passBuf = ''; passRender(); $('pass-dots').classList.remove('bad'); }
@@ -1102,8 +1202,12 @@
             passRender();
             if (passBuf.length === 4) {
                 if (passBuf === STOP_PASSWORD) {
-                    apiCall('/api/stop_patrol'); closeOverlay();
-                    showToast('Devriye durduruldu'); setExpression('happy', 2000);
+                    closeOverlay();
+                    if (passAction === 'start_mapping') startMappingFlow();
+                    else {
+                        apiCall('/api/stop_patrol');
+                        showToast('Devriye durduruldu'); setExpression('happy', 2000);
+                    }
                 } else {
                     $('pass-dots').classList.add('bad');
                     setTimeout(passReset, 500);
@@ -1111,6 +1215,93 @@
             }
         });
         $('pass-cancel').addEventListener('click', closeOverlay);
+
+        // ==================== ORTAMI HARİTALA (canlı SLAM + joystick) ====================
+        async function startMappingFlow() {
+            const res = await apiCall('/api/start_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+            if (!res || res.result !== 'ok') { showToast('❌ Başlatılamadı: ' + (res && res.reason || '')); return; }
+            showToast('Haritalama başladı, robotu sürebilirsiniz.');
+            openOverlay(overlayMapping);
+            enterMappingView();
+        }
+
+        let liveMapTimer = null;
+        function enterMappingView() {
+            const img = $('live-map'), ph = $('map-placeholder');
+            img.hidden = true; ph.hidden = false;
+            img.onload = () => { img.hidden = false; ph.hidden = true; };
+            img.onerror = () => { img.hidden = true; ph.hidden = false; };
+            clearInterval(liveMapTimer);
+            liveMapTimer = setInterval(() => { img.src = '/api/live_map.png?_=' + Date.now(); }, 1200);
+            img.src = '/api/live_map.png?_=' + Date.now();
+        }
+        function leaveMappingView() {
+            clearInterval(liveMapTimer);
+            joyStop();
+        }
+        $('mapping-backdrop').addEventListener('click', closeOverlay);
+
+        $('btn-cancel-mapping').addEventListener('click', async () => {
+            leaveMappingView();
+            await apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+            showToast('Haritalamadan vazgeçildi.');
+            closeOverlay();
+        });
+
+        $('btn-finish-mapping').addEventListener('click', async () => {
+            showToast('Harita kaydediliyor, lütfen bekleyin...');
+            leaveMappingView();
+            const res = await apiCall('/api/finish_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+            if (!res || res.result !== 'ok') {
+                showToast('❌ Kaydedilemedi: ' + (res && res.reason || ''));
+                enterMappingView();
+                return;
+            }
+            if (!res.pose_captured) {
+                showToast('⚠ Robot konumu otomatik alınamadı - Kurulum ekranında "🤖 Robot Burada" ile elle ayarlayın.', 5000);
+            } else {
+                showToast('✅ Harita kaydedildi! Şimdi masaları/kapıyı işaretleyin.');
+            }
+            closeOverlay();
+            setTimeout(() => { window.location.href = '/setup'; }, 1400);
+        });
+
+        // ---- sanal joystick (pointer events - dokunmatik + mouse) ----
+        const JOY_MAX_LIN = 0.30, JOY_MAX_ANG = 1.00, JOY_R = 95;
+        const joyBase = $('joy-base'), joyKnob = $('joy-knob');
+        let joyDragging = false, joyActiveId = null, joySendTimer = null, joyLx = 0, joyAz = 0;
+        function setKnob(dx, dy) { joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; }
+        function joyDown(e) {
+            if (joyDragging) return;
+            joyDragging = true; joyActiveId = e.pointerId;
+            joyBase.setPointerCapture(joyActiveId);
+            joyMove(e);
+            clearInterval(joySendTimer);
+            joySendTimer = setInterval(() => { apiCall('/api/teleop', JSON.stringify({ lx: joyLx, az: joyAz })); }, 120);
+        }
+        function joyMove(e) {
+            if (!joyDragging || e.pointerId !== joyActiveId) return;
+            const rect = joyBase.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+            let dx = e.clientX - cx, dy = e.clientY - cy;
+            const dist = Math.hypot(dx, dy);
+            if (dist > JOY_R) { dx = dx / dist * JOY_R; dy = dy / dist * JOY_R; }
+            setKnob(dx, dy);
+            joyLx = (-dy / JOY_R) * JOY_MAX_LIN;
+            joyAz = (-dx / JOY_R) * JOY_MAX_ANG;
+        }
+        function joyStop() {
+            joyDragging = false; joyActiveId = null;
+            clearInterval(joySendTimer);
+            setKnob(0, 0);
+            joyLx = 0; joyAz = 0;
+            apiCall('/api/teleop_stop');
+        }
+        joyBase.addEventListener('pointerdown', joyDown);
+        joyBase.addEventListener('pointermove', joyMove);
+        joyBase.addEventListener('pointerup', joyStop);
+        joyBase.addEventListener('pointercancel', joyStop);
+        window.addEventListener('blur', () => { if (joyDragging) joyStop(); });
 
         // ==================== MESAJLAŞMA ====================
         let replyMode = null;        // {from, to} — cevap modunda kilitli
@@ -1488,10 +1679,11 @@
 
                 let info = { state: 'idle', waypoint: '', order: '', wait_total: 10, wait_remaining: 0,
                              interacting: false, greeting: false, cute: false,
-                             screen_on: false, speak_text: '', speak_seq: 0,
+                             screen_on: false, speak_text: '', speak_seq: 0, map_ready: true,
                              msg_phase: '', msg_from: '', msg_to: '', msg_text: '', msg_total: 15, msg_remaining: 0 };
                 let parsed = false;
                 try { info = Object.assign(info, JSON.parse(data.status)); parsed = true; } catch (e) { /* ignore */ }
+                latestMapReady = !!info.map_ready;
 
                 // Sunucuya bağlandık ama patrol.py'den /patrol_status gelmiyor mu?
                 if (!parsed || data.count === 0) {

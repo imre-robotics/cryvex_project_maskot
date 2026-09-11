@@ -8,6 +8,10 @@
   <material name="black">
     <color rgba="0 0 0 1"/>
   </material>
+  <!-- Bumblebee sarısı: govde/kaporta bu renkte, teker/gozde/sensor/ekran siyah kaliyor -->
+  <material name="bee_yellow">
+    <color rgba="1.0 0.78 0.0 1"/>
+  </material>
 
   <!-- Base Footprint -->
   <link name="base_footprint"/>
@@ -22,7 +26,7 @@
   <link name="base_link">
     <visual>
       <geometry><cylinder radius="0.25" length="0.15"/></geometry>
-      <material name="white"/>
+      <material name="bee_yellow"/>
     </visual>
     <collision>
       <geometry><cylinder radius="0.25" length="0.15"/></geometry>
@@ -32,7 +36,7 @@
       <inertia ixx="0.26" ixy="0.0" ixz="0.0" iyy="0.26" iyz="0.0" izz="0.46"/>
     </inertial>
   </link>
-  <gazebo reference="base_link"><material>Gazebo/White</material></gazebo>
+  <gazebo reference="base_link"><material>Gazebo/Yellow</material></gazebo>
 
   <!-- Gövde ve Raflar (Body) -->
   <joint name="body_joint" type="fixed">
@@ -44,7 +48,7 @@
   <link name="body_link">
     <visual>
       <geometry><box size="0.3 0.4 0.95"/></geometry>
-      <material name="white"/>
+      <material name="bee_yellow"/>
     </visual>
     <collision>
       <geometry><box size="0.3 0.4 0.95"/></geometry>
@@ -54,7 +58,7 @@
       <inertia ixx="0.4" ixy="0.0" ixz="0.0" iyy="0.4" iyz="0.0" izz="0.06"/>
     </inertial>
   </link>
-  <gazebo reference="body_link"><material>Gazebo/White</material></gazebo>
+  <gazebo reference="body_link"><material>Gazebo/Yellow</material></gazebo>
 
   <!-- Ekran (Tablet Bölümü - Göğüs Yüzeyine Yapışık) -->
   <joint name="head_joint" type="fixed">

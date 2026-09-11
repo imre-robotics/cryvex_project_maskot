@@ -20,6 +20,7 @@ Senaryolar:
 
 Konumlar `worlds/cafe.world` geometrisine gore hesaplanmistir.
 """
+import os
 import math
 import json
 import time
@@ -35,6 +36,7 @@ from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from geometry_msgs.msg import PoseStamped, Twist
 from sensor_msgs.msg import Range
 from std_msgs.msg import String
+from ament_index_python.packages import get_package_share_directory
 
 
 # --- Masa yaklasim pozlari ---
@@ -104,6 +106,13 @@ ESCAPE_BACK_LIN = 0.12
 ESCAPE_TURN_ANG = 0.80
 ESCAPE_FWD_LIN = 0.10
 
+# --- Operator ekrani: canli haritalama joystick'i (STATE_TELEOP) ---
+# Wifi/arayuz kopukluguna karsi guvenlik: bu suredir taze 'teleop:' komutu
+# gelmezse (parmak ekrandan kalkti, baglanti koptu) motor otomatik durur.
+TELEOP_WATCHDOG_SECONDS = 0.6
+TELEOP_MAX_LIN = 0.30
+TELEOP_MAX_ANG = 1.00
+
 TABLE_WAIT_SECONDS = 10.0             # masada siparis icin bekleme
 INTERACT_TIMEOUT_SECONDS = 90.0      # menu bu kadar acik kalirsa sayac zorla devam
 WANDER_GREET_SECONDS = 4.0           # wander duraginda selamlasma molasi
@@ -138,6 +147,7 @@ STATE_WANDER = 'wander'
 STATE_GREET_DOOR = 'greet_door'      # garson "kapida karsila" dedi -> 3 dk kapida
 STATE_DIRECTED = 'directed'          # garson telefondan bir masaya yonlendirdi
 STATE_MESSENGER = 'messenger'        # birinden birine mesaj tasiyor
+STATE_TELEOP = 'teleop'              # operator ekranindan canli joystick suruşu
 
 
 class CommandListener(Node):
@@ -172,6 +182,14 @@ class CommandListener(Node):
         self.msg_total = 0.0
         self.msg_remaining = 0.0
         self.sonar = None              # main()'de SonarReader baglanir
+        # operator kurulum ekrani: harita+masalar KAYDEDILENE kadar devriye/goto
+        # komutlari reddedilir (yeni haritada anlamsiz eski WAYPOINTS'e gitmesin).
+        # Var olan kafede (baslangicta mevcut waypoints.json) True baslar.
+        self.map_ready = True
+        self.teleop_lx = 0.0            # operator joystick (canli haritalama)
+        self.teleop_az = 0.0
+        self.teleop_last_t = 0.0
+        self.set_pose_req = None        # (x,y,yaw) | None - haritalama sonrasi AMCL'e "buradayim" bilgisi
 
         self.create_subscription(String, '/patrol_command', self._command_callback, 10)
         self.status_pub = self.create_publisher(String, '/patrol_status', 10)
@@ -190,6 +208,16 @@ class CommandListener(Node):
 
         # Siparis tasirken (DELIVERING/AT_BARISTA) garson override'lari yok sayilir.
         busy_with_order = self.state in (STATE_DELIVERING, STATE_AT_BARISTA)
+
+        # Kurulum/haritalama surerken (map_ready=False) devriye/yonlendirme
+        # komutlari YOK SAYILIR - operator "Kaydet"e basip yeni noktalari
+        # onaylayana kadar robot eski (artik anlamsiz) WAYPOINTS'e gitmeye
+        # calismaz. Teleop bu kontrolden MUAF (haritalama tam da bunu kullanir).
+        nav_cmd = cmd in ('start', 'wander', 'go_home', 'greet_door') or cmd.startswith('goto:')
+        if nav_cmd and not self.map_ready:
+            self.get_logger().warn(
+                f"KOMUT '{cmd}' reddedildi: kurulum/haritalama surüyor (map_ready=False).")
+            return
 
         if cmd == 'start':
             if busy_with_order:
@@ -253,6 +281,14 @@ class CommandListener(Node):
         elif cmd == 'relocalize':
             self.relocalize_req = True
             self.get_logger().info('KOMUT: Robotu Us pozuna sabitle (AMCL)')
+
+        elif cmd == 'reload_waypoints':
+            # Kurulum ekranindan yeni noktalar kaydedildi -> restart gerekmeden uygula
+            cfg = load_or_seed_waypoints_cfg()
+            if apply_waypoints_cfg(cfg, logger=self.get_logger()):
+                self.get_logger().info('KOMUT: Noktalar (waypoints.json) yeniden yuklendi.')
+            else:
+                self.get_logger().warn('KOMUT: reload_waypoints basarisiz, eski degerler korundu.')
 
         elif cmd == 'wake':
             self.screen_on = True
@@ -318,6 +354,57 @@ class CommandListener(Node):
             else:
                 self.get_logger().warn(f'Gecersiz goto komutu: {cmd}')
 
+        elif cmd.startswith('teleop:'):
+            # teleop:<lx>:<az>  - operator ekrani sanal joystick (canli haritalama)
+            if busy_with_order:
+                self.get_logger().warn('KOMUT: teleop - siparis tasinirken kabul edilmez.')
+            else:
+                try:
+                    _, lx_s, az_s = cmd.split(':')
+                    lx = max(-TELEOP_MAX_LIN, min(TELEOP_MAX_LIN, float(lx_s)))
+                    az = max(-TELEOP_MAX_ANG, min(TELEOP_MAX_ANG, float(az_s)))
+                except (ValueError, IndexError):
+                    lx = az = 0.0
+                self.teleop_lx = lx
+                self.teleop_az = az
+                self.teleop_last_t = time.time()
+                if self.state != STATE_TELEOP:
+                    self.get_logger().info('KOMUT: Teleop (canli haritalama joystick) basladi')
+                self.state = STATE_TELEOP
+
+        elif cmd == 'teleop_stop':
+            self.teleop_lx = 0.0
+            self.teleop_az = 0.0
+            if self.state == STATE_TELEOP:
+                self.state = STATE_IDLE
+                self.get_logger().info('KOMUT: Teleop durdu')
+
+        elif cmd == 'mapping_start':
+            if busy_with_order:
+                self.get_logger().warn('KOMUT: mapping_start - once siparis teslim edilmeli.')
+            else:
+                self.map_ready = False
+                self.interacting = False
+                self.greeting = False
+                self.state = STATE_IDLE
+                self.get_logger().warn('KOMUT: Haritalama/kurulum BASLADI - devriye kilitlendi.')
+
+        elif cmd == 'mapping_done':
+            self.map_ready = True
+            self.get_logger().info('KOMUT: Kurulum TAMAMLANDI - devriye tekrar kullanilabilir.')
+
+        elif cmd.startswith('set_pose:'):
+            # set_pose:<x>:<y>:<yaw> - AMCL'e "robot su an TAM OLARAK burada" de.
+            # Haritalama bitince OTOMATIK (tablet_server, SLAM'in son TF'inden) veya
+            # kurulum ekranindan "Robot Burada" ile MANUEL tetiklenir. map_ready
+            # kontrolune TABI DEGIL - bu bir devriye komutu degil, altyapi.
+            try:
+                _, x_s, y_s, yaw_s = cmd.split(':')
+                self.set_pose_req = (float(x_s), float(y_s), float(yaw_s))
+                self.get_logger().info(f'KOMUT: AMCL pozu ayarlanacak -> {self.set_pose_req}')
+            except (ValueError, IndexError):
+                self.get_logger().warn(f'Gecersiz set_pose komutu: {cmd}')
+
         else:
             self.get_logger().warn(f'Bilinmeyen komut: {cmd}')
 
@@ -366,6 +453,7 @@ class CommandListener(Node):
             'msg_total': round(self.msg_total, 1),
             'msg_remaining': round(self.msg_remaining, 1),
             'msg_composing': self.msg_composing,
+            'map_ready': self.map_ready,
         }
         msg = String()
         msg.data = json.dumps(status)
@@ -424,6 +512,106 @@ def person_location(name):
         if wp['isim'] == name:
             return wp
     return None
+
+
+# ==================== masa/kapi/barmen noktalari (kurulum ekranindan) ====================
+# web/setup.html haritaya tiklayarak nokta toplar, tablet_server.py bunu
+# config/waypoints.json'a yazar, biz burada okuyup WAYPOINTS/BARISTA_POS/
+# HOME_POSITION/DOOR_POS'u YERINDE guncelleriz (restart gerekmez, 'reload_waypoints'
+# komutuyla veya acilista otomatik).
+def _waypoints_config_path():
+    """config/waypoints.json konumu. --symlink-install ile calisiyoruz: bu
+    betigin GERCEK (symlink cozulmus) yeri src/cryvex_gazebo/scripts/patrol.py'dir.
+    Oradan kaynak agacindaki config/'u bulup KAYNAGA yaziyoruz - yoksa dosya
+    install/ icine dusup bir sonraki `colcon build`'da kaybolur / tablet_server
+    ile farkli yerlere yazip okumaya baslarlar."""
+    real_script = os.path.realpath(os.path.abspath(__file__))
+    src_config_dir = os.path.join(os.path.dirname(os.path.dirname(real_script)), 'config')
+    if os.path.isfile(os.path.join(src_config_dir, 'nav2_params.yaml')):
+        return os.path.join(src_config_dir, 'waypoints.json')  # symlink-install: kaynak agaci
+    try:
+        share_config_dir = os.path.join(get_package_share_directory('cryvex_gazebo'), 'config')
+    except Exception:  # noqa: BLE001
+        share_config_dir = src_config_dir
+    return os.path.join(share_config_dir, 'waypoints.json')
+
+
+def _default_waypoints_cfg():
+    """Su anki sabit degerlerden bir konfigurasyon uretir (ilk kurulum tohumu)."""
+    return {
+        'barista': {'isim': 'Barmen', 'x': BARISTA_POS['x'], 'y': BARISTA_POS['y'],
+                    'yaw': BARISTA_POS['yaw']},
+        'door': {'isim': 'Kapi', 'x': DOOR_POS['x'], 'y': DOOR_POS['y'], 'yaw': DOOR_POS['yaw']},
+        'tables': [{'isim': wp['isim'], 'x': wp['x'], 'y': wp['y'], 'yaw': wp['yaw']}
+                   for wp in WAYPOINTS],
+    }
+
+
+def load_or_seed_waypoints_cfg():
+    """config/waypoints.json varsa okur; yoksa mevcut sabit degerlerden bir tane
+    yazar (kurulum ekrani ilk acildiginda bos degil, mevcut duzeni gorur)."""
+    path = _waypoints_config_path()
+    if os.path.exists(path):
+        try:
+            with open(path, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            print(f'[UYARI] waypoints.json okunamadi ({exc}), varsayilanlar kullanilacak.')
+            return None
+    cfg = _default_waypoints_cfg()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        print(f'[BILGI] Ilk waypoints.json olusturuldu: {path}')
+    except Exception as exc:  # noqa: BLE001
+        print(f'[UYARI] waypoints.json yazilamadi ({exc}).')
+    return cfg
+
+
+def apply_waypoints_cfg(cfg, logger=None):
+    """cfg -> WAYPOINTS / BARISTA_POS / HOME_POSITION / DOOR_POS (yerinde degistirir,
+    boylece calisan patrol dongusu de aninda yeni degerleri gorur)."""
+    def log(msg):
+        logger.info(msg) if logger else print(msg)
+
+    if not cfg:
+        log('[UYARI] Gecersiz waypoints konfigurasyonu, degisiklik yapilmadi.')
+        return False
+    try:
+        new_tables = []
+        for i, t in enumerate(cfg.get('tables') or []):
+            new_tables.append({
+                'isim': str(t.get('isim') or f'Masa {i + 1}'),
+                'x': float(t['x']), 'y': float(t['y']), 'yaw': float(t.get('yaw', 0.0)),
+            })
+        if new_tables:
+            WAYPOINTS[:] = new_tables
+        else:
+            log('[UYARI] Konfigurasyonda masa yok, mevcut masalar korundu.')
+
+        b = cfg.get('barista')
+        if b:
+            BARISTA_POS.clear()
+            BARISTA_POS.update({'isim': b.get('isim') or 'Barmen', 'x': float(b['x']),
+                                 'y': float(b['y']), 'yaw': float(b.get('yaw', 0.0))})
+            HOME_POSITION.clear()
+            HOME_POSITION.update({'isim': 'Us', 'x': BARISTA_POS['x'],
+                                   'y': BARISTA_POS['y'], 'yaw': BARISTA_POS['yaw']})
+
+        d = cfg.get('door')
+        if d:
+            DOOR_POS.clear()
+            DOOR_POS.update({'isim': d.get('isim') or 'Kapi', 'x': float(d['x']),
+                              'y': float(d['y']), 'yaw': float(d.get('yaw', 0.0))})
+
+        log(f'[BILGI] Noktalar yuklendi: {len(WAYPOINTS)} masa, '
+            f'barmen/us=({BARISTA_POS["x"]:.2f},{BARISTA_POS["y"]:.2f}), '
+            f'kapi=({DOOR_POS["x"]:.2f},{DOOR_POS["y"]:.2f})')
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log(f'[HATA] waypoints uygulanamadi: {exc}')
+        return False
 
 
 def yaw_to_quaternion(yaw):
@@ -650,6 +838,11 @@ def drive(navigator, listener, target, expected_state):
 def main():
     rclpy.init()
 
+    # Kurulum ekranindan (web/setup.html) kaydedilmis noktalar varsa yukle;
+    # yoksa asagidaki sabit degerlerden ilk waypoints.json'u olustur.
+    _cfg = load_or_seed_waypoints_cfg()
+    apply_waypoints_cfg(_cfg)
+
     listener = CommandListener()
     executor = SingleThreadedExecutor()
     executor.add_node(listener)
@@ -754,6 +947,17 @@ def main():
                     set_home_pose()
                     time.sleep(0.4)
                 listener.get_logger().info('AMCL pozu Us noktasina sabitlendi.')
+            if listener.set_pose_req is not None:
+                x, y, yaw = listener.set_pose_req
+                listener.set_pose_req = None
+                # Nav2/AMCL yeni haritalamadan sonra taze basladiysa lifecycle
+                # aktivasyonu birkac sn surebilir - o yuzden set_home_pose'dan
+                # (18 sn) daha uzun ve sabirli tekrar ediyoruz.
+                for _ in range(10):
+                    navigator.setInitialPose(make_pose(navigator, x, y, yaw))
+                    time.sleep(1.0)
+                listener.get_logger().info(
+                    f'AMCL pozu haritalama sonrasi ({x:.2f}, {y:.2f}, yaw={yaw:.2f}) olarak ayarlandi.')
             time.sleep(0.2)
     threading.Thread(target=_relocalize_loop, daemon=True).start()
 
@@ -792,6 +996,10 @@ def main():
 
         # ---------------- DEVRIYE (sadece masalar; kapi karsilamasi AYRI komut) ----------------
         if state == STATE_PATROL:
+            if not WAYPOINTS:   # kurulum hicbir masa kaydetmeden bir sekilde buraya dusulduyse
+                listener.get_logger().error('WAYPOINTS bos - devriye bekletiliyor.')
+                listener.state = STATE_IDLE
+                continue
             wp_index %= len(WAYPOINTS)
             wp = WAYPOINTS[wp_index]
             listener.table_index = wp_index
@@ -1011,6 +1219,25 @@ def main():
                 listener.msg_phase = ''
                 listener.msg_remaining = 0.0
                 listener.state = STATE_PATROL
+
+        # ---------------- TELEOP (operator canli haritalama joystick'i) ----------------
+        elif state == STATE_TELEOP:
+            if time.time() - listener.teleop_last_t > TELEOP_WATCHDOG_SECONDS:
+                # Taze komut yok (parmak kalkti / baglanti koptu) -> guvenlik durusu.
+                listener.stop_motion()
+                time.sleep(0.05)
+                continue
+            lx, az = listener.teleop_lx, listener.teleop_az
+            front, rear, _left, _right = listener.blocked_sides()
+            if lx > 0.0 and front:      # 10 cm altinda engele dogru ilerlemeyi engelle
+                lx = 0.0
+            if lx < 0.0 and rear:
+                lx = 0.0
+            tw = Twist()
+            tw.linear.x = lx
+            tw.angular.z = az
+            listener.drive_raw(tw)
+            time.sleep(0.05)
 
         # ---------------- USE DON ----------------
         elif state == STATE_GOING_HOME:
