@@ -391,6 +391,10 @@
             pointer-events: none;
         }
         .mapping-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .mapping-tip {
+            font-size: 0.78rem; color: var(--text-muted); line-height: 1.5;
+            text-align: center; margin: -6px 0 14px; padding: 0 4px;
+        }
 
         /* ---------- MESAJ FORM ALANLARI ---------- */
         .compose-panel { max-height: 96vh; overflow-y: auto; padding-top: 0; }
@@ -526,6 +530,7 @@
         .btn-red { background: rgba(255, 68, 102, 0.08); color: var(--accent-red); border: 1px solid rgba(255, 68, 102, 0.18); }
         .btn-cyan { background: rgba(0, 229, 255, 0.08); color: var(--accent-cyan); border: 1px solid rgba(0, 229, 255, 0.18); }
         .btn-gray { background: rgba(255, 255, 255, 0.04); color: var(--text-muted); border: 1px solid rgba(255, 255, 255, 0.07); }
+        .btn-amber { background: rgba(255, 170, 0, 0.1); color: var(--accent-amber); border: 1px solid rgba(255, 170, 0, 0.25); }
         .btn-primary { background: var(--accent-cyan); color: #04121a; border: none; font-weight: 700; box-shadow: 0 4px 18px rgba(0, 229, 255, 0.3); }
         .btn-primary:disabled { background: rgba(255,255,255,0.08); color: var(--text-muted); box-shadow: none; }
         .btn-primary:active:not(:disabled) { transform: scale(0.96); }
@@ -774,6 +779,7 @@
                 <button class="btn btn-cyan" id="btn-wander"><span class="btn-icon">🎈</span> Sosyalleşme (Gezinme)</button>
                 <button class="btn btn-cyan" id="btn-go-home"><span class="btn-icon">🏠</span> Üsse Dön</button>
                 <button class="btn btn-red" id="btn-stop-patrol"><span class="btn-icon">🔒</span> Devriyeyi Durdur</button>
+                <button class="btn btn-amber" id="btn-open-rescue"><span class="btn-icon">🆘</span> Kurtar (Manuel Sürüş)</button>
                 <button class="btn btn-cyan" id="btn-open-mapping"><span class="btn-icon">🗺️</span> Ortamı Haritala</button>
                 <a class="btn btn-gray" href="/setup" style="text-decoration:none; box-sizing:border-box;"><span class="btn-icon">📍</span> Kurulum Ekranı (Masa/Kapı Noktaları)</a>
                 <button class="btn btn-gray close-manager"><span class="btn-icon">✕</span> Kapat</button>
@@ -803,8 +809,11 @@
         <div class="backdrop" id="mapping-backdrop"></div>
         <div class="panel-bottom">
             <div class="panel-handle"></div>
-            <h2 class="panel-title">🗺️ Ortamı Haritala</h2>
-            <p class="panel-sub">Robotu joystick ile sürüp haritayı çıkarın</p>
+            <h2 class="panel-title" id="joy-title">🗺️ Ortamı Haritala</h2>
+            <p class="panel-sub" id="joy-sub">Robotu joystick ile sürüp haritayı çıkarın</p>
+            <p class="mapping-tip" id="joy-tip">💡 Sürerken robotun <b>arkasından</b> yürüyün ki lidar sizi engel olarak
+                haritaya işlemesin. Bitirmeden önce robotu durdurup son konumuna getirin —
+                o konum ve yönü otomatik kaydedilir (gerekirse Kurulum ekranında "🤖 Robot Burada" ile düzeltebilirsiniz).</p>
             <div class="map-frame">
                 <img id="live-map" hidden>
                 <div class="map-placeholder" id="map-placeholder">Harita oluşturuluyor... robotu sürmeye başlayın, birazdan burada görünecek.</div>
@@ -813,8 +822,8 @@
                 <div class="joy-base" id="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
             </div>
             <div class="mapping-actions">
-                <button class="btn btn-gray" id="btn-cancel-mapping"><span class="btn-icon">✕</span> Vazgeç</button>
-                <button class="btn btn-green" id="btn-finish-mapping"><span class="btn-icon">✓</span> Bitir</button>
+                <button class="btn btn-gray" id="btn-cancel-mapping"><span class="btn-icon">✕</span> <span id="btn-cancel-mapping-label">Vazgeç</span></button>
+                <button class="btn btn-green" id="btn-finish-mapping"><span class="btn-icon">✓</span> <span id="btn-finish-mapping-label">Bitir</span></button>
             </div>
         </div>
     </div>
@@ -1173,12 +1182,13 @@
             apiCall('/api/go_home'); closeOverlay();
             showToast('Üsse dönülüyor…');
         });
-        // Sifre ekrani BIRDEN FAZLA eylem icin kullanilir (Durdur / Ortami Haritala) -
-        // hangisi oldugunu passAction tutar, dogru sifre girilince ona gore calisir.
+        // Sifre ekrani BIRDEN FAZLA eylem icin kullanilir (Durdur / Ortami Haritala /
+        // Kurtar) - hangisi oldugunu passAction tutar, dogru sifre girilince ona gore calisir.
         let passAction = 'stop';
         const PASS_SUB = {
             stop: 'Devriyeyi durdurmak için 4 haneli şifre',
             start_mapping: 'Haritalamayı başlatmak için 4 haneli şifre',
+            rescue: 'Kurtarma moduna geçmek için 4 haneli şifre',
         };
         function openPassFor(action) {
             passAction = action;
@@ -1187,6 +1197,7 @@
         }
         $('btn-stop-patrol').addEventListener('click', () => openPassFor('stop'));
         $('btn-open-mapping').addEventListener('click', () => openPassFor('start_mapping'));
+        $('btn-open-rescue').addEventListener('click', () => openPassFor('rescue'));
 
         let passBuf = '';
         function passReset() { passBuf = ''; passRender(); $('pass-dots').classList.remove('bad'); }
@@ -1204,6 +1215,7 @@
                 if (passBuf === STOP_PASSWORD) {
                     closeOverlay();
                     if (passAction === 'start_mapping') startMappingFlow();
+                    else if (passAction === 'rescue') startRescueFlow();
                     else {
                         apiCall('/api/stop_patrol');
                         showToast('Devriye durduruldu'); setExpression('happy', 2000);
@@ -1216,11 +1228,50 @@
         });
         $('pass-cancel').addEventListener('click', closeOverlay);
 
-        // ==================== ORTAMI HARİTALA (canlı SLAM + joystick) ====================
+        // ==================== ORTAMI HARİTALA / KURTAR (canlı joystick paneli) ====================
+        // Ayni joystick + harita overlay'i IKI amaca hizmet eder: 'map' (SLAM ile
+        // ortami haritala) ve 'rescue' (robot herhangi bir gorevde takilirsa garson
+        // devralir, biraktiginda AYNI gorev kaldigi yerden devam eder). joyMode
+        // baslik/ipucu/buton metnini ve hangi API uclarinin cagrilacagini belirler.
+        let joyMode = 'map';
+        const JOY_TEXT = {
+            map: {
+                title: '🗺️ Ortamı Haritala', sub: 'Robotu joystick ile sürüp haritayı çıkarın',
+                tip: '💡 Sürerken robotun <b>arkasından</b> yürüyün ki lidar sizi engel olarak ' +
+                     'haritaya işlemesin. Bitirmeden önce robotu durdurup son konumuna getirin — ' +
+                     'o konum ve yönü otomatik kaydedilir (gerekirse Kurulum ekranında "🤖 Robot Burada" ile düzeltebilirsiniz).',
+                cancel: 'Vazgeç', finish: 'Bitir',
+            },
+            rescue: {
+                title: '🆘 Kurtarma Modu', sub: 'Robotu joystick ile takıldığı yerden çıkarın',
+                tip: '💡 Robot şu an olduğu göreve devam etmeye çalışıyor ama takıldı. ' +
+                     'Elle sürüp açık bir yere getirin, "Bitti"ye basınca AYNI göreve kaldığı yerden devam edecek.',
+                cancel: 'Kapat', finish: 'Bitti, Devam Et',
+            },
+        };
+        function applyJoyText() {
+            const t = JOY_TEXT[joyMode];
+            $('joy-title').textContent = t.title;
+            $('joy-sub').textContent = t.sub;
+            $('joy-tip').innerHTML = t.tip;
+            $('btn-cancel-mapping-label').textContent = t.cancel;
+            $('btn-finish-mapping-label').textContent = t.finish;
+        }
+
         async function startMappingFlow() {
             const res = await apiCall('/api/start_mapping', JSON.stringify({ password: STOP_PASSWORD }));
             if (!res || res.result !== 'ok') { showToast('❌ Başlatılamadı: ' + (res && res.reason || '')); return; }
+            joyMode = 'map'; applyJoyText();
             showToast('Haritalama başladı, robotu sürebilirsiniz.');
+            openOverlay(overlayMapping);
+            enterMappingView();
+        }
+
+        async function startRescueFlow() {
+            const res = await apiCall('/api/rescue_start', JSON.stringify({ password: STOP_PASSWORD }));
+            if (!res || res.result !== 'ok') { showToast('❌ Başlatılamadı: ' + (res && res.reason || '')); return; }
+            joyMode = 'rescue'; applyJoyText();
+            showToast('Kurtarma modu başladı, robotu sürebilirsiniz.');
             openOverlay(overlayMapping);
             enterMappingView();
         }
@@ -1237,18 +1288,39 @@
         }
         function leaveMappingView() {
             clearInterval(liveMapTimer);
-            joyStop();
+            joyDragging = false; joyActiveId = null;
+            clearInterval(joySendTimer);
+            setKnob(0, 0);
+            joyLx = 0; joyAz = 0;
+            // NOT: joyStop()'tan FARKLI olarak burada rescue TAM olarak biter
+            // (rescue_stop) - overlay kapanirken/degisirken robotu suresiz
+            // "kurtarma bekliyor" halinde birakmamak icin. joyStop() (parmak
+            // gecici kalkti) rescue modunda SADECE hizi sifirlar, modu korur.
+            if (joyMode === 'rescue') apiCall('/api/rescue_stop');
+            else apiCall('/api/teleop_stop');
         }
         $('mapping-backdrop').addEventListener('click', closeOverlay);
 
         $('btn-cancel-mapping').addEventListener('click', async () => {
             leaveMappingView();
-            await apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
-            showToast('Haritalamadan vazgeçildi.');
+            if (joyMode === 'rescue') {
+                await apiCall('/api/rescue_stop');
+                showToast('Kurtarma bitti, görev kaldığı yerden devam ediyor.');
+            } else {
+                await apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+                showToast('Haritalamadan vazgeçildi.');
+            }
             closeOverlay();
         });
 
         $('btn-finish-mapping').addEventListener('click', async () => {
+            if (joyMode === 'rescue') {
+                leaveMappingView();
+                await apiCall('/api/rescue_stop');
+                showToast('✅ Kurtarma tamam, robot görevine devam ediyor.');
+                closeOverlay();
+                return;
+            }
             showToast('Harita kaydediliyor, lütfen bekleyin...');
             leaveMappingView();
             const res = await apiCall('/api/finish_mapping', JSON.stringify({ password: STOP_PASSWORD }));
@@ -1277,7 +1349,8 @@
             joyBase.setPointerCapture(joyActiveId);
             joyMove(e);
             clearInterval(joySendTimer);
-            joySendTimer = setInterval(() => { apiCall('/api/teleop', JSON.stringify({ lx: joyLx, az: joyAz })); }, 120);
+            const ep = joyMode === 'rescue' ? '/api/rescue_teleop' : '/api/teleop';
+            joySendTimer = setInterval(() => { apiCall(ep, JSON.stringify({ lx: joyLx, az: joyAz })); }, 120);
         }
         function joyMove(e) {
             if (!joyDragging || e.pointerId !== joyActiveId) return;
@@ -1295,7 +1368,11 @@
             clearInterval(joySendTimer);
             setKnob(0, 0);
             joyLx = 0; joyAz = 0;
-            apiCall('/api/teleop_stop');
+            // NOT: rescue'da bu sadece HIZI SIFIRLAR, kurtarma modundan CIKMAZ -
+            // parmak gecici kalksa bile gorev otomatik devam etmeye baslamasin,
+            // sadece "Bitti"ye basinca (rescue_stop) devam eder.
+            if (joyMode === 'rescue') apiCall('/api/rescue_teleop', JSON.stringify({ lx: 0, az: 0 }));
+            else apiCall('/api/teleop_stop');
         }
         joyBase.addEventListener('pointerdown', joyDown);
         joyBase.addEventListener('pointermove', joyMove);

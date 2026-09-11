@@ -169,7 +169,14 @@ controller_server:
       # Varsayilan kritikler / agirliklar - engelden asiri kacinip kitlenmesin.
       # (Dinamik engel ince ayari gercek robotta yapilacak.)
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
+      # BaseObstacle.scale 0.02 (nav2/TB3 stock degeri) yol/hedef hizalama
+      # kritiklerinin (24-32) yaninda neredeyse SIFIR agirlikta kaliyordu -
+      # DWB "engelden uzak dur"u pratikte hic onemsemiyordu, bu yuzden
+      # haritada olmayan bir engele/masaya cok yaklasip kendini sikistiriyordu
+      # ("siyah noktalara cok yanasip kendini esir ediyor", 2026-09-11). 0.3'e
+      # cikarildi - hala yol takibinden ONCELIKLI DEGIL (o yuzden eskisi gibi
+      # uzaktan durup kilitlenmez) ama artik gercek bir agirligi var.
+      BaseObstacle.scale: 0.3
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.1
       GoalAlign.scale: 24.0
@@ -227,7 +234,12 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.5
-        inflation_radius: 0.45      # robot yaricapi + ~10 cm; dar koridorlarda tikanma yok
+        inflation_radius: 0.50      # robot yaricapi + ~15 cm (0.45'ten hafif artti). BaseObstacle
+                                    # duzeltmesiyle birlikte biraz daha nefes payi icin KUCUK bir
+                                    # adim - daha once "cok uzaktan durup kilitleniyor" sikayetine
+                                    # yol acan buyuk sicramalari (obstacle_max_range, DWB agirliklari
+                                    # vs.) TEKRARLAMIYORUZ, sadece asil kusurlu BaseObstacle.scale'i
+                                    # duzeltip burada minimal destek veriyoruz.
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -271,7 +283,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.5
-        inflation_radius: 0.45
+        inflation_radius: 0.50   # local costmap ile ayni (bkz. yukarida)
       always_send_full_costmap: True
 
 map_server:

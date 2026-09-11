@@ -323,6 +323,36 @@ class TabletHandler(BaseHTTPRequestHandler):
         elif path == '/api/teleop_stop':
             self._publish_command('teleop_stop')
             self._send_json({'result': 'ok'})
+        elif path == '/api/rescue_start':
+            # Robot herhangi bir gorevde (devriye/siparis/vs) takilirsa garson
+            # devralir - "Devriyeyi Durdur" ile ayni sifre gerekir (Nav2 gorevini
+            # iptal edip manuel surus baslatan, geri donusu olmayan bir eylem).
+            try:
+                d = json.loads(self._read_body() or '{}')
+            except (ValueError, TypeError):
+                d = {}
+            if str(d.get('password', '')) != OPERATOR_PASSWORD:
+                self._send_json({'result': 'error', 'reason': 'wrong password'})
+                return
+            self._publish_command('rescue_start')
+            self._send_json({'result': 'ok'})
+        elif path == '/api/rescue_teleop':
+            # govde: {"lx":-0.3..0.3, "az":-1.0..1.0} - kurtarma joystick'i.
+            # Sifre YOK - rescue_start zaten sifreyle acildi, her hareket icin
+            # tekrar sifre istemek joystick'i kullanilamaz hale getirir.
+            try:
+                d = json.loads(self._read_body() or '{}')
+                lx = float(d.get('lx', 0.0))
+                az = float(d.get('az', 0.0))
+            except (ValueError, TypeError):
+                lx = az = 0.0
+            self._publish_command(f'rescue_teleop:{lx:.3f}:{az:.3f}')
+            self._send_json({'result': 'ok'})
+        elif path == '/api/rescue_stop':
+            # Kurtarma modundan CIK -> gorev kaldigi yerden devam eder. Sifre
+            # gerekmez (bitirmek/gorevi geri vermek riskli bir eylem degil).
+            self._publish_command('rescue_stop')
+            self._send_json({'result': 'ok'})
         elif path == '/api/start_mapping':
             try:
                 d = json.loads(self._read_body() or '{}')

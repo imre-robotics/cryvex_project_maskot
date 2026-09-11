@@ -190,6 +190,13 @@ class CommandListener(Node):
         self.teleop_az = 0.0
         self.teleop_last_t = 0.0
         self.set_pose_req = None        # (x,y,yaw) | None - haritalama sonrasi AMCL'e "buradayim" bilgisi
+        # Kurtarma modu: robot herhangi bir gorev icinde (devriye/siparis/vs)
+        # takilirsa garson joystick ile devralir; drive() icinden yonetilir,
+        # STATE'i DEGISTIRMEZ - bittiginde ayni gorev kaldigi yerden devam eder.
+        self.rescue_active = False
+        self.rescue_lx = 0.0
+        self.rescue_az = 0.0
+        self.rescue_last_t = 0.0
 
         self.create_subscription(String, '/patrol_command', self._command_callback, 10)
         self.status_pub = self.create_publisher(String, '/patrol_status', 10)
@@ -379,6 +386,34 @@ class CommandListener(Node):
                 self.state = STATE_IDLE
                 self.get_logger().info('KOMUT: Teleop durdu')
 
+        elif cmd == 'rescue_start':
+            # busy_with_order/map_ready KONTROLU YOK - robot siparis tasirken
+            # bile takilabilir, o an tam da kurtarmaya en cok ihtiyac duyulan an.
+            self.rescue_active = True
+            self.rescue_last_t = time.time()
+            self.get_logger().warn('KOMUT: KURTARMA MODU basladi (garson manuel suruyor).')
+
+        elif cmd.startswith('rescue_teleop:'):
+            try:
+                _, lx_s, az_s = cmd.split(':')
+                lx = max(-TELEOP_MAX_LIN, min(TELEOP_MAX_LIN, float(lx_s)))
+                az = max(-TELEOP_MAX_ANG, min(TELEOP_MAX_ANG, float(az_s)))
+            except (ValueError, IndexError):
+                lx = az = 0.0
+            self.rescue_lx = lx
+            self.rescue_az = az
+            self.rescue_last_t = time.time()
+            self.rescue_active = True   # joystick'e her dokunuldugunda kurtarma AKTIF kalsin
+
+        elif cmd == 'rescue_stop':
+            # Sadece hizi sifirla + kurtarma modundan CIK (gorev kaldigi yerden
+            # devam eder). Parmagin ekrandan gecici kalkmasiyla (rescue_teleop:0:0)
+            # KARISTIRILMAMALI - o ayri, kurtarma modunda KALIR.
+            self.rescue_active = False
+            self.rescue_lx = 0.0
+            self.rescue_az = 0.0
+            self.get_logger().info('KOMUT: KURTARMA MODU bitti - gorev kaldigi yerden devam.')
+
         elif cmd == 'mapping_start':
             if busy_with_order:
                 self.get_logger().warn('KOMUT: mapping_start - once siparis teslim edilmeli.')
@@ -454,6 +489,7 @@ class CommandListener(Node):
             'msg_remaining': round(self.msg_remaining, 1),
             'msg_composing': self.msg_composing,
             'map_ready': self.map_ready,
+            'rescue_active': self.rescue_active,
         }
         msg = String()
         msg.data = json.dumps(status)
@@ -690,6 +726,36 @@ def _escape_maneuver(listener, reason, expected_state):
     log.info('KURTULMA tamam -> hedefe tekrar deneniyor.')
 
 
+def _rescue_maneuver(listener, expected_state):
+    """Garson '🆘 Kurtar' ile joystick uzerinden MANUEL suruyor (drive() Nav2
+    gorevini zaten iptal etti). rescue_active False olana kadar (yani
+    'Bitti, Devam Et'e basana kadar) burada kalinir - suresiz, otomatik
+    zaman asimi YOK (garson karar verir). Bittiginde drive() cagirani AYNI
+    hedefe kaldigi yerden devam eder; ne state ne de gorev degisti, sadece
+    robot fiziksel olarak baska bir yerde/yonde - Nav2 oradan yeniden planlar."""
+    log = listener.get_logger()
+    log.warn('KURTARMA MODU basladi - garson manuel suruyor, "Bitti"ye basmasi bekleniyor...')
+    while listener.rescue_active and listener.state == expected_state:
+        if time.time() - listener.rescue_last_t > TELEOP_WATCHDOG_SECONDS:
+            listener.stop_motion()          # parmak kalkti/baglanti koptu -> guvenlik durusu
+            time.sleep(0.05)
+            continue
+        lx, az = listener.rescue_lx, listener.rescue_az
+        front, rear, _left, _right = listener.blocked_sides()
+        if lx > 0.0 and front:              # kurtarirken bile 10 cm engele SURME
+            lx = 0.0
+        if lx < 0.0 and rear:
+            lx = 0.0
+        tw = Twist()
+        tw.linear.x = lx
+        tw.angular.z = az
+        listener.drive_raw(tw)
+        time.sleep(0.05)
+    listener.stop_motion()
+    time.sleep(0.3)
+    log.info('KURTARMA MODU bitti -> hedefe kaldigi yerden tekrar deneniyor.')
+
+
 def _depart_maneuver(listener, expected_state):
     """Masadan ayrilirken donup gitmeden once ~1 m DUZ geri cekilir. Boylece
     Nav2 donusu/sonraki hedefe gidisi masaya/sandalyeye cok yakinken degil,
@@ -795,6 +861,10 @@ def drive(navigator, listener, target, expected_state):
                 listener.last_pos = target
                 return True
 
+            if listener.rescue_active:                    # garson "Kurtar" ile devraldi
+                escape_reason = 'rescue'
+                break
+
             if listener.ultra_blocked():                 # < 10 cm fiziksel engel
                 escape_reason = 'ultra'
                 break
@@ -806,14 +876,21 @@ def drive(navigator, listener, target, expected_state):
 
         if escape_reason:
             navigator.cancelTask()
-            escapes += 1
-            _escape_maneuver(listener, escape_reason, expected_state)
+            if escape_reason == 'rescue':
+                # Garsonun manuel suruşu MAX_ESCAPES_PER_GOAL'a SAYILMAZ - bu bir
+                # hata degil, bilincli mudahale. Bittiginde AYNI hedefe (kaldigi
+                # yerden, gorev/state degismeden) tekrar denenir.
+                _rescue_maneuver(listener, expected_state)
+            else:
+                escapes += 1
+                _escape_maneuver(listener, escape_reason, expected_state)
+                if escapes >= MAX_ESCAPES_PER_GOAL:
+                    log.error(f"{target['isim']}: {escapes} kurtulma denemesi yetmedi, "
+                              "adim atlaniyor -> devriyeye devam.")
+                    listener.last_pos = target
+                    return False
             listener.last_pos = target
             if listener.state != expected_state:
-                return False
-            if escapes >= MAX_ESCAPES_PER_GOAL:
-                log.error(f"{target['isim']}: {escapes} kurtulma denemesi yetmedi, "
-                          "adim atlaniyor -> devriyeye devam.")
                 return False
             continue                                     # ayni offset, tekrar dene
 
