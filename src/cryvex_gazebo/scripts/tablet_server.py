@@ -301,6 +301,19 @@ class TabletHandler(BaseHTTPRequestHandler):
         elif path == '/api/greet_door':
             self._publish_command('greet_door')
             self._send_json({'result': 'ok'})
+        elif path == '/api/goto':
+            # govde: {"table": 1..N, "action": "welcome_menu"}  (varsayilan action)
+            # "Kontrol Sende" masa yonlendirme - patrol.py'nin zaten var olan
+            # STATE_DIRECTED/goto: komutunu kullanir (garson paneli icin yapilmisti).
+            try:
+                d = json.loads(self._read_body() or '{}')
+                table = int(d['table'])
+                action = str(d.get('action') or 'welcome_menu')
+            except (KeyError, ValueError, TypeError):
+                self._send_json({'result': 'error', 'reason': 'bad body'})
+                return
+            self._publish_command(f'goto:{table}:{action}')
+            self._send_json({'result': 'ok'})
         elif path == '/api/relocalize':
             self._publish_command('relocalize')
             self._send_json({'result': 'ok'})

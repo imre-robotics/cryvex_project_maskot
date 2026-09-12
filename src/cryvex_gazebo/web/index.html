@@ -395,6 +395,15 @@
             font-size: 0.78rem; color: var(--text-muted); line-height: 1.5;
             text-align: center; margin: -6px 0 14px; padding: 0 4px;
         }
+        .table-picker {
+            display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 14px;
+        }
+        .table-picker button {
+            padding: 10px 16px; border-radius: 20px; border: 1px solid var(--card-line);
+            background: var(--card); color: var(--text-primary); font-family: inherit;
+            font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: transform 0.12s, filter 0.12s;
+        }
+        .table-picker button:active { transform: scale(0.95); background: rgba(0,229,255,0.15); }
 
         /* ---------- MESAJ FORM ALANLARI ---------- */
         .compose-panel { max-height: 96vh; overflow-y: auto; padding-top: 0; }
@@ -780,6 +789,7 @@
                 <button class="btn btn-cyan" id="btn-go-home"><span class="btn-icon">🏠</span> Üsse Dön</button>
                 <button class="btn btn-red" id="btn-stop-patrol"><span class="btn-icon">🔒</span> Devriyeyi Durdur</button>
                 <button class="btn btn-amber" id="btn-open-rescue"><span class="btn-icon">🆘</span> Kurtar (Manuel Sürüş)</button>
+                <button class="btn btn-cyan" id="btn-open-control"><span class="btn-icon">🕹️</span> Kontrol Sende</button>
                 <button class="btn btn-cyan" id="btn-open-mapping"><span class="btn-icon">🗺️</span> Ortamı Haritala</button>
                 <a class="btn btn-gray" href="/setup" style="text-decoration:none; box-sizing:border-box;"><span class="btn-icon">📍</span> Kurulum Ekranı (Masa/Kapı Noktaları)</a>
                 <button class="btn btn-gray close-manager"><span class="btn-icon">✕</span> Kapat</button>
@@ -804,7 +814,7 @@
         </div>
     </div>
 
-    <!-- ============ ORTAMI HARİTALA ============ -->
+    <!-- ============ ORTAMI HARİTALA / KURTAR / KONTROL SENDE (ortak joystick paneli) ============ -->
     <div class="overlay" id="overlay-mapping">
         <div class="backdrop" id="mapping-backdrop"></div>
         <div class="panel-bottom">
@@ -821,6 +831,7 @@
             <div class="joy-wrap">
                 <div class="joy-base" id="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
             </div>
+            <div class="table-picker" id="table-picker" hidden></div>
             <div class="mapping-actions">
                 <button class="btn btn-gray" id="btn-cancel-mapping"><span class="btn-icon">✕</span> <span id="btn-cancel-mapping-label">Vazgeç</span></button>
                 <button class="btn btn-green" id="btn-finish-mapping"><span class="btn-icon">✓</span> <span id="btn-finish-mapping-label">Bitir</span></button>
@@ -1189,6 +1200,7 @@
             stop: 'Devriyeyi durdurmak için 4 haneli şifre',
             start_mapping: 'Haritalamayı başlatmak için 4 haneli şifre',
             rescue: 'Kurtarma moduna geçmek için 4 haneli şifre',
+            control: 'Kontrolü almak için 4 haneli şifre',
         };
         function openPassFor(action) {
             passAction = action;
@@ -1198,6 +1210,7 @@
         $('btn-stop-patrol').addEventListener('click', () => openPassFor('stop'));
         $('btn-open-mapping').addEventListener('click', () => openPassFor('start_mapping'));
         $('btn-open-rescue').addEventListener('click', () => openPassFor('rescue'));
+        $('btn-open-control').addEventListener('click', () => openPassFor('control'));
 
         let passBuf = '';
         function passReset() { passBuf = ''; passRender(); $('pass-dots').classList.remove('bad'); }
@@ -1216,6 +1229,7 @@
                     closeOverlay();
                     if (passAction === 'start_mapping') startMappingFlow();
                     else if (passAction === 'rescue') startRescueFlow();
+                    else if (passAction === 'control') startControlFlow();
                     else {
                         apiCall('/api/stop_patrol');
                         showToast('Devriye durduruldu'); setExpression('happy', 2000);
@@ -1240,13 +1254,19 @@
                 tip: '💡 Sürerken robotun <b>arkasından</b> yürüyün ki lidar sizi engel olarak ' +
                      'haritaya işlemesin. Bitirmeden önce robotu durdurup son konumuna getirin — ' +
                      'o konum ve yönü otomatik kaydedilir (gerekirse Kurulum ekranında "🤖 Robot Burada" ile düzeltebilirsiniz).',
-                cancel: 'Vazgeç', finish: 'Bitir',
+                cancel: 'Vazgeç', finish: 'Bitir', showTables: false,
             },
             rescue: {
                 title: '🆘 Kurtarma Modu', sub: 'Robotu joystick ile takıldığı yerden çıkarın',
                 tip: '💡 Robot şu an olduğu göreve devam etmeye çalışıyor ama takıldı. ' +
                      'Elle sürüp açık bir yere getirin, "Bitti"ye basınca AYNI göreve kaldığı yerden devam edecek.',
-                cancel: 'Kapat', finish: 'Bitti, Devam Et',
+                cancel: 'Kapat', finish: 'Bitti, Devam Et', showTables: false,
+            },
+            control: {
+                title: '🕹️ Kontrol Sende', sub: 'Joystick ile serbestçe sürün veya bir masaya yönlendirin',
+                tip: '💡 Bir masaya dokunursanız robot oraya gidip menüyü açar. Bitirdiğinizde ' +
+                     '"Devriyeye Devam Et"e basın — otonom devriye kaldığı yerden sürer.',
+                cancel: 'Kapat', finish: '▶ Devriyeye Devam Et', showTables: true,
             },
         };
         function applyJoyText() {
@@ -1256,6 +1276,7 @@
             $('joy-tip').innerHTML = t.tip;
             $('btn-cancel-mapping-label').textContent = t.cancel;
             $('btn-finish-mapping-label').textContent = t.finish;
+            $('table-picker').hidden = !t.showTables;
         }
 
         async function startMappingFlow() {
@@ -1274,6 +1295,36 @@
             showToast('Kurtarma modu başladı, robotu sürebilirsiniz.');
             openOverlay(overlayMapping);
             enterMappingView();
+        }
+
+        async function startControlFlow() {
+            joyMode = 'control'; applyJoyText();
+            showToast('Kontrol sende — serbest sür ya da bir masa seç.');
+            openOverlay(overlayMapping);
+            enterMappingView();
+            populateTablePicker();
+        }
+
+        async function populateTablePicker() {
+            const box = $('table-picker');
+            box.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">Masalar yükleniyor…</span>';
+            try {
+                const res = await fetch('/api/waypoints?_=' + Date.now());
+                const wp = await res.json();
+                box.innerHTML = '';
+                (wp.tables || []).forEach((t, i) => {
+                    const b = document.createElement('button');
+                    b.textContent = t.isim || `Masa ${i + 1}`;
+                    b.addEventListener('click', async () => {
+                        const r = await apiCall('/api/goto', JSON.stringify({ table: i + 1, action: 'welcome_menu' }));
+                        showToast(r && r.result === 'ok' ? `➡ ${b.textContent}'e yönlendiriliyor…` : '❌ Gönderilemedi');
+                    });
+                    box.appendChild(b);
+                });
+                if (!box.children.length) box.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">Henüz masa tanımlı değil.</span>';
+            } catch (e) {
+                box.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">Masalar alınamadı.</span>';
+            }
         }
 
         let liveMapTimer = null;
@@ -1306,6 +1357,8 @@
             if (joyMode === 'rescue') {
                 await apiCall('/api/rescue_stop');
                 showToast('Kurtarma bitti, görev kaldığı yerden devam ediyor.');
+            } else if (joyMode === 'control') {
+                showToast('Kapatıldı (devriye otomatik başlamadı).');
             } else {
                 await apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
                 showToast('Haritalamadan vazgeçildi.');
@@ -1318,6 +1371,13 @@
                 leaveMappingView();
                 await apiCall('/api/rescue_stop');
                 showToast('✅ Kurtarma tamam, robot görevine devam ediyor.');
+                closeOverlay();
+                return;
+            }
+            if (joyMode === 'control') {
+                leaveMappingView();
+                await apiCall('/api/start_patrol');
+                showToast('▶ Devriye başlatıldı.');
                 closeOverlay();
                 return;
             }

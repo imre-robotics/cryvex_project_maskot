@@ -1,0 +1,90 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+/// tablet_server.py'nin REST API'sine ince bir istemci. Backend'de HİÇBİR
+/// değişiklik yok - web arayüzünün (index.html) kullandığı UÇLARIN AYNISINI
+/// çağırıyoruz, sadece WiFi üzerinden farklı bir cihazdan (telefon).
+class RobotApi {
+  RobotApi({required this.baseUrl});
+
+  /// Örn: "http://192.168.1.9:8080"
+  String baseUrl;
+
+  Uri _u(String path) => Uri.parse('$baseUrl$path');
+
+  Future<Map<String, dynamic>> _postJson(String path,
+      [Map<String, dynamic>? body, Duration timeout = const Duration(seconds: 6)]) async {
+    try {
+      final res = await http
+          .post(_u(path),
+              headers: {'Content-Type': 'application/json'},
+              body: body != null ? jsonEncode(body) : null)
+          .timeout(timeout);
+      if (res.body.isEmpty) return {'result': 'ok'};
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'result': 'error', 'reason': e.toString()};
+    }
+  }
+
+  // start_mapping/finish_mapping/cancel_mapping tablet_server.py tarafinda
+  // Nav2/SLAM sureclerini SIGINT ile durdurup (bkz. LaunchManager._stop_locked,
+  // 8sn + 3sn'ye kadar bekleyebilir) yeniden baslatiyor; finish_mapping ayrica
+  // map_saver_cli'yi de bekliyor (15sn'ye kadar). Kisa bir timeout (6sn) bu
+  // isteklerin GERCEKTEN calisirken zaman asimina ugrayip hatali "basarisiz"
+  // gostermesine yol aciyordu ("ekran acilmiyor" bug'i) - bu ucler icin cok
+  // daha uzun bir sure taniyoruz.
+  static const _longOp = Duration(seconds: 30);
+
+  Future<Map<String, dynamic>> _getJson(String path) async {
+    final res = await http.get(_u(path)).timeout(const Duration(seconds: 6));
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---- durum ----
+  Future<Map<String, dynamic>> status() => _getJson('/api/status');
+  Future<Map<String, dynamic>> mode() => _getJson('/api/mode');
+  Future<Map<String, dynamic>> waypoints() => _getJson('/api/waypoints');
+
+  /// Canlı/harita PNG'sinin URL'i - Image.network ile dogrudan kullanilir.
+  /// Onbellegi asmak icin her seferinde farkli bir cache-bust query eklenir.
+  String liveMapUrl() => '$baseUrl/api/live_map.png?_=${DateTime.now().millisecondsSinceEpoch}';
+  String mapUrl() => '$baseUrl/api/map.png?_=${DateTime.now().millisecondsSinceEpoch}';
+
+  // ---- devriye kontrolleri ----
+  Future<void> startPatrol() => _postJson('/api/start_patrol');
+  Future<void> stopPatrol() => _postJson('/api/stop_patrol');
+  Future<void> wander() => _postJson('/api/wander');
+  Future<void> goHome() => _postJson('/api/go_home');
+  Future<void> greetDoor() => _postJson('/api/greet_door');
+  Future<void> wake() => _postJson('/api/wake');
+  Future<void> sleep() => _postJson('/api/sleep');
+
+  /// action: welcome | menu | welcome_menu | cute (varsayilan welcome_menu)
+  Future<Map<String, dynamic>> goto(int tableNumber, {String action = 'welcome_menu'}) =>
+      _postJson('/api/goto', {'table': tableNumber, 'action': action});
+
+  // ---- serbest sürüş (harita/kontrol modlarinda ortak) ----
+  Future<void> teleop(double lx, double az) => _postJson('/api/teleop', {'lx': lx, 'az': az});
+  Future<void> teleopStop() => _postJson('/api/teleop_stop');
+
+  // ---- kurtarma ----
+  Future<Map<String, dynamic>> rescueStart(String password) =>
+      _postJson('/api/rescue_start', {'password': password});
+  Future<void> rescueTeleop(double lx, double az) =>
+      _postJson('/api/rescue_teleop', {'lx': lx, 'az': az});
+  Future<void> rescueStop() => _postJson('/api/rescue_stop');
+
+  // ---- haritalama (uzun zaman asimi - yukarida _longOp aciklamasina bakin) ----
+  Future<Map<String, dynamic>> startMapping(String password) =>
+      _postJson('/api/start_mapping', {'password': password}, _longOp);
+  Future<Map<String, dynamic>> finishMapping(String password) =>
+      _postJson('/api/finish_mapping', {'password': password}, _longOp);
+  Future<Map<String, dynamic>> cancelMapping(String password) =>
+      _postJson('/api/cancel_mapping', {'password': password}, _longOp);
+
+  /// Haritalama sonrasi manuel "Robot Burada" (2D pose estimate).
+  Future<Map<String, dynamic>> setPose(double x, double y, double yaw) =>
+      _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': yaw});
+}
