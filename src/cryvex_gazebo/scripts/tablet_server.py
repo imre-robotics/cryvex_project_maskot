@@ -13,7 +13,9 @@ from rclpy.duration import Duration
 from std_msgs.msg import String
 from nav_msgs.msg import OccupancyGrid
 from tf2_ros import Buffer, TransformListener
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+import asyncio
+import hashlib
 import threading
 import json
 import math
@@ -25,9 +27,24 @@ import subprocess
 import time
 import sys
 import struct
+import urllib.parse
 import zlib
 import ast
 from ament_index_python.packages import get_package_share_directory
+
+try:
+    import edge_tts  # gercek Turkce sinir agi sesi (Microsoft Azure Neural TTS,
+    # internet gerektirir) - kurulu degilse /api/tts_audio sessizce basarisiz olur
+    # ve tarayici KENDI sesine (speechSynthesis) doner, hicbir sey kirilmaz.
+    _EDGE_TTS_AVAILABLE = True
+except ImportError:
+    _EDGE_TTS_AVAILABLE = False
+
+# Robotun sesi: Microsoft Edge'in gercek Turkce sinir agi seslerinden biri.
+# tr-TR-EmelNeural (kadin) | tr-TR-AhmetNeural (erkek) - degistirmek icin tek satir.
+TTS_VOICE = 'tr-TR-EmelNeural'
+TTS_CACHE_DIR = '/tmp/cryvex_tts_cache'  # kalici olmasi gerekmez, sadece ayni
+                                          # cumleyi tekrar tekrar sentezlememek icin
 
 # Operator (kurulum/haritalama) ekraninin sifresi - musteri ekranindaki "Devriyeyi
 # Durdur" sifresiyle AYNI (1234), garsonun zaten bildigi tek kod. Sadece server
@@ -125,6 +142,43 @@ def _occgrid_to_png_bytes(msg):
         dst = (h - 1 - row) * w
         flipped[dst:dst + w] = pixels[src:src + w]
     return _gray_bytes_to_png(w, h, bytes(flipped))
+
+
+# ==================== Ses (TTS) - gercek Turkce sinir agi sesi ====================
+def _tts_audio_bytes(text):
+    """text -> mp3 bytes (edge-tts, TTS_VOICE - Microsoft Azure Neural TTS,
+    Turkce karakterleri (ç,ğ,ı,ö,ş,ü) dogru okuyan gercek bir dil modeli).
+    Ayni metin diskte onbelleklenir (menude/karsilamada tekrar eden cumleler
+    icin internet+gecikme harcamayalim). Basarisiz olursa (internet yok,
+    edge_tts kurulu degil, zaman asimi) None doner - HTTP handler bunu 503'e
+    cevirir, tarayici SESSIZCE kendi sesine (speechSynthesis) doner."""
+    if not _EDGE_TTS_AVAILABLE or not text:
+        return None
+    key = hashlib.sha1(f'{TTS_VOICE}:{text}'.encode('utf-8')).hexdigest()
+    path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except Exception:  # noqa: BLE001
+            pass  # onbellek bozuksa yeniden sentezle
+
+    async def _synth():
+        communicate = edge_tts.Communicate(text, TTS_VOICE)
+        await communicate.save(path)
+
+    try:
+        os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+        asyncio.run(asyncio.wait_for(_synth(), timeout=8.0))
+        with open(path, 'rb') as f:
+            return f.read()
+    except Exception:  # noqa: BLE001
+        try:
+            if os.path.exists(path):
+                os.remove(path)  # yarim kalmis/bozuk dosya kalmasin
+        except Exception:  # noqa: BLE001
+            pass
+        return None
 
 
 class LaunchManager:
@@ -238,8 +292,31 @@ class TabletHandler(BaseHTTPRequestHandler):
             self._send_json(self.ros_node.map_info())
         elif path == '/api/waypoints':
             self._send_json(self.ros_node.load_waypoints_cfg())
+        elif path == '/api/tts_audio':
+            self._serve_tts_audio()
         else:
             self.send_error(404)
+
+    def _serve_tts_audio(self):
+        # ?text=<url-encoded cumle> - robotun gercek Turkce sinir agi sesiyle
+        # (edge-tts) okumasi. Basarisiz olursa 503 - index.html bunu SESSIZCE
+        # yakalayip kendi tarayici sesine (speechSynthesis) doner.
+        qs = urllib.parse.urlparse(self.path).query
+        text = urllib.parse.parse_qs(qs).get('text', [''])[0].strip()
+        if not text:
+            self.send_error(400, 'text parametresi gerekli')
+            return
+        audio = _tts_audio_bytes(text)
+        if audio is None:
+            self.send_error(503, 'TTS uretilemedi (internet yok / edge-tts kurulu degil)')
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'audio/mpeg')
+        # Ayni metin -> AYNI ses dosyasi (onbellekli) - tarayici da onbellekleyebilir.
+        self.send_header('Cache-Control', 'public, max-age=86400')
+        self.send_header('Content-Length', str(len(audio)))
+        self.end_headers()
+        self.wfile.write(audio)
 
     def _serve_map_png(self):
         try:
@@ -775,7 +852,13 @@ def main():
 
     port = 8080
     try:
-        server = HTTPServer(('0.0.0.0', port), TabletHandler)
+        # ThreadingHTTPServer (duz HTTPServer degil): TTS sentezi (edge-tts,
+        # internet uzerinden ~1-3 sn) veya Nav2/SLAM baslatma gibi yavas istekler
+        # artik ayni anda gelen durum/joystick isteklerini TIKAMASIN diye
+        # istek basina ayri thread. Mevcut paylasilan durum (LaunchManager kendi
+        # kilidini kullaniyor; harita PNG onbellegi/waypoints dosyasi nadiren
+        # cakisir, en kotu ihtimalle gereksiz tekrar hesaplama olur, veri bozulmaz).
+        server = ThreadingHTTPServer(('0.0.0.0', port), TabletHandler)
     except OSError as exc:
         node.get_logger().error(
             f'PORT {port} ACILAMADI ({exc}). Eski bir tablet_server hala calisiyor olabilir. '

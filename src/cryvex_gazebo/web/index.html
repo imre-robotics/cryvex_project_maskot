@@ -1024,8 +1024,41 @@
             speechSynthesis.onvoiceschanged = pickTrVoice;
             pickTrVoice();
         }
-        // Chrome uzun metni ~15 sn'de keser: cümlelere böl, sırayla söyle.
+        // Robotun sesi: ONCE sunucu tarafinda gercek bir Turkce sinir agi sesi
+        // dener (edge-tts, /api/tts_audio - Turkce karakterleri (ç,ğ,ı,ö,ş,ü)
+        // dogru okuyan gercek bir dil modeli). Internet yoksa / sunucu
+        // uretemezse SESSIZCE eski yonteme (tarayicinin kendi speechSynthesis
+        // sesi) doner - hicbir davranis kaybolmuyor, sadece daha iyisi eklendi.
+        let ttsAudioEl = null;
         function speak(text) {
+            if (!text) return;
+            playServerTts(text).catch(() => speakBrowser(text));
+        }
+        function playServerTts(text) {
+            return new Promise((resolve, reject) => {
+                if (!ttsAudioEl) {
+                    ttsAudioEl = new Audio();
+                    ttsAudioEl.style.display = 'none';
+                    document.body.appendChild(ttsAudioEl);
+                }
+                const ctrl = new AbortController();
+                const giveUp = setTimeout(() => { ctrl.abort(); reject(new Error('tts timeout')); }, 4000);
+                fetch('/api/tts_audio?text=' + encodeURIComponent(text), { signal: ctrl.signal })
+                    .then(res => { if (!res.ok) throw new Error('tts http ' + res.status); return res.blob(); })
+                    .then(blob => {
+                        clearTimeout(giveUp);
+                        speechSynthesis.cancel();   // tarayici sesiyle CAKISMASIN
+                        ttsAudioEl.src = URL.createObjectURL(blob);
+                        ttsAudioEl.onended = resolve;
+                        ttsAudioEl.onerror = () => reject(new Error('audio playback error'));
+                        ttsAudioEl.play().then(resolve).catch(reject);
+                    })
+                    .catch(err => { clearTimeout(giveUp); reject(err); });
+            });
+        }
+        // ESKİ YÖNTEM (yedek): tarayıcının kendi sesi. Chrome uzun metni
+        // ~15 sn'de keser: cümlelere böl, sırayla söyle.
+        function speakBrowser(text) {
             try {
                 if (!('speechSynthesis' in window) || !text) return;
                 speechSynthesis.cancel();
