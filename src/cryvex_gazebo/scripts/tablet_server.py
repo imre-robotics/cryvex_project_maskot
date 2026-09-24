@@ -16,6 +16,7 @@ from tf2_ros import Buffer, TransformListener
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import asyncio
 import hashlib
+import io
 import threading
 import json
 import math
@@ -28,6 +29,7 @@ import time
 import sys
 import struct
 import urllib.parse
+import wave
 import zlib
 import ast
 from ament_index_python.packages import get_package_share_directory
@@ -40,11 +42,25 @@ try:
 except ImportError:
     _EDGE_TTS_AVAILABLE = False
 
+try:
+    from piper import PiperVoice  # tamamen OFFLINE Turkce ses - kafenin interneti
+    # giderse (edge-tts basarisiz olursa) robot YINE de duzgun konussun diye 2.
+    # katman. Kurulu degilse sessizce atlanir, tarayici sesine geriye duser.
+    _PIPER_AVAILABLE = True
+except ImportError:
+    _PIPER_AVAILABLE = False
+
 # Robotun sesi: Microsoft Edge'in gercek Turkce sinir agi seslerinden biri.
 # tr-TR-EmelNeural (kadin) | tr-TR-AhmetNeural (erkek) - degistirmek icin tek satir.
 TTS_VOICE = 'tr-TR-EmelNeural'
 TTS_CACHE_DIR = '/tmp/cryvex_tts_cache'  # kalici olmasi gerekmez, sadece ayni
                                           # cumleyi tekrar tekrar sentezlememek icin
+
+# Piper: tek Turkce ses secenegi budur (piper-voices deposunda baska yok,
+# 2026-09-20 itibariyle kontrol edildi). ONNX model dosyasi (~60 MB) pakete
+# gomulu (piper_voices/), internet gerektirmeden calisir.
+PIPER_VOICE_NAME = 'tr_TR-dfki-medium'
+_piper_voice_singleton = None  # ilk kullanimda yuklenir (~0.5s), sonra tekrar kullanilir
 
 # Operator (kurulum/haritalama) ekraninin sifresi - musteri ekranindaki "Devriyeyi
 # Durdur" sifresiyle AYNI (1234), garsonun zaten bildigi tek kod. Sadece server
@@ -144,17 +160,44 @@ def _occgrid_to_png_bytes(msg):
     return _gray_bytes_to_png(w, h, bytes(flipped))
 
 
-# ==================== Ses (TTS) - gercek Turkce sinir agi sesi ====================
-def _tts_audio_bytes(text):
-    """text -> mp3 bytes (edge-tts, TTS_VOICE - Microsoft Azure Neural TTS,
-    Turkce karakterleri (ç,ğ,ı,ö,ş,ü) dogru okuyan gercek bir dil modeli).
-    Ayni metin diskte onbelleklenir (menude/karsilamada tekrar eden cumleler
-    icin internet+gecikme harcamayalim). Basarisiz olursa (internet yok,
-    edge_tts kurulu degil, zaman asimi) None doner - HTTP handler bunu 503'e
-    cevirir, tarayici SESSIZCE kendi sesine (speechSynthesis) doner."""
-    if not _EDGE_TTS_AVAILABLE or not text:
+# ==================== Ses (TTS) - 2 katmanli gercek Turkce ses ====================
+# 1) edge-tts (bulut, en kaliteli, internet gerekir)
+# 2) Piper (yerel/tamamen offline - kafenin interneti giderse robot YINE de
+#    duzgun Turkce konusabilsin diye - malzeme listesi rev.4'un "Piper TTS"
+#    maddesi budur, edge-tts EKLENTI olarak kaldi cunku online iken daha kaliteli)
+# 3) (bu fonksiyonun DISINDA) tarayicinin kendi sesi - HTTP 503 donunce
+#    index.html speakBrowser()'a otomatik geriye duser - DEGISMEDI.
+def _piper_model_path():
+    # cafe_map.pgm/waypoints.json ile AYNI real-path cozumleme deseni (bkz.
+    # TabletServerNode.__init__) - piper_voices/ STATIK (build-time) bir
+    # dizin oldugu icin aslinda share/ dizininden de calisir, ama kaynak
+    # agacindan calistirirken (colcon build/--symlink-install sonrasi restart
+    # gerekmeden) ayni satirda test edilebilsin diye ayni tercih sirasi kullanildi.
+    real_script = os.path.realpath(os.path.abspath(__file__))
+    src_root = os.path.dirname(os.path.dirname(real_script))
+    src_path = os.path.join(src_root, 'piper_voices', PIPER_VOICE_NAME + '.onnx')
+    if os.path.isfile(src_path):
+        return src_path
+    share_dir = get_package_share_directory('cryvex_gazebo')
+    return os.path.join(share_dir, 'piper_voices', PIPER_VOICE_NAME + '.onnx')
+
+
+def _get_piper_voice():
+    global _piper_voice_singleton
+    if _piper_voice_singleton is None:
+        model_path = _piper_model_path()
+        if not os.path.isfile(model_path):
+            return None
+        _piper_voice_singleton = PiperVoice.load(model_path)
+    return _piper_voice_singleton
+
+
+def _tts_audio_edge(text):
+    """edge-tts katmani: text -> mp3 bytes veya None (internet yok/zaman asimi/
+    kurulu degil). Ayni metin diskte onbelleklenir."""
+    if not _EDGE_TTS_AVAILABLE:
         return None
-    key = hashlib.sha1(f'{TTS_VOICE}:{text}'.encode('utf-8')).hexdigest()
+    key = hashlib.sha1(f'edge:{TTS_VOICE}:{text}'.encode('utf-8')).hexdigest()
     path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
     if os.path.isfile(path) and os.path.getsize(path) > 0:
         try:
@@ -179,6 +222,52 @@ def _tts_audio_bytes(text):
         except Exception:  # noqa: BLE001
             pass
         return None
+
+
+def _tts_audio_piper(text):
+    """Piper katmani: text -> wav bytes veya None (model dosyasi yok/sentez
+    hatasi). Tamamen yerel/offline - internet GEREKMEZ. Ayni metin diskte
+    onbelleklenir (edge-tts ile ayni desen, farkli anahtar/uzanti)."""
+    if not _PIPER_AVAILABLE:
+        return None
+    key = hashlib.sha1(f'piper:{PIPER_VOICE_NAME}:{text}'.encode('utf-8')).hexdigest()
+    path = os.path.join(TTS_CACHE_DIR, key + '.wav')
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        voice = _get_piper_voice()
+        if voice is None:
+            return None
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            voice.synthesize_wav(text, wf)
+        data = buf.getvalue()
+        os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+        return data
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _tts_audio_bytes(text):
+    """text -> (audio_bytes, content_type) veya (None, None). Turkce
+    karakterleri (ç,ğ,ı,ö,ş,ü) dogru okuyan gercek bir dil modeli - once
+    edge-tts (daha kaliteli), o basarisiz olursa Piper (offline) dener."""
+    if not text:
+        return None, None
+    audio = _tts_audio_edge(text)
+    if audio is not None:
+        return audio, 'audio/mpeg'
+    audio = _tts_audio_piper(text)
+    if audio is not None:
+        return audio, 'audio/wav'
+    return None, None
 
 
 class LaunchManager:
@@ -306,12 +395,12 @@ class TabletHandler(BaseHTTPRequestHandler):
         if not text:
             self.send_error(400, 'text parametresi gerekli')
             return
-        audio = _tts_audio_bytes(text)
+        audio, content_type = _tts_audio_bytes(text)
         if audio is None:
-            self.send_error(503, 'TTS uretilemedi (internet yok / edge-tts kurulu degil)')
+            self.send_error(503, 'TTS uretilemedi (edge-tts VE Piper ikisi de basarisiz)')
             return
         self.send_response(200)
-        self.send_header('Content-Type', 'audio/mpeg')
+        self.send_header('Content-Type', content_type)
         # Ayni metin -> AYNI ses dosyasi (onbellekli) - tarayici da onbellekleyebilir.
         self.send_header('Cache-Control', 'public, max-age=86400')
         self.send_header('Content-Length', str(len(audio)))

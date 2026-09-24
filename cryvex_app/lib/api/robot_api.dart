@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 /// tablet_server.py'nin REST API'sine ince bir istemci. Backend'de HİÇBİR
@@ -87,4 +88,35 @@ class RobotApi {
   /// Haritalama sonrasi manuel "Robot Burada" (2D pose estimate).
   Future<Map<String, dynamic>> setPose(double x, double y, double yaw) =>
       _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': yaw});
+
+  // ---- hoparlör sesi (0-100, robotun kendi hoparlörü - JBL vb.) ----
+  Future<int> getVolume() async {
+    try {
+      final data = await _getJson('/api/volume');
+      final v = (data['volume'] as num?)?.toInt() ?? -1;
+      return v;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  Future<void> setVolume(int pct) => _postJson('/api/volume', {'volume': pct});
+
+  /// Robotun gerçek sesi (Piper/edge-tts) - text -> ses bayt dizisi ya da
+  /// null (sunucu üretemedi, ör. sessizce geç).
+  Future<Uint8List?> fetchTtsAudio(String text) async {
+    try {
+      final res = await http
+          .get(_u('/api/tts_audio?text=${Uri.encodeComponent(text)}'))
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      return res.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sesi TELEFONDA DEĞİL, robotun kendi hoparlöründe (Pi'ye bağlı JBL vb.)
+  /// çaldırır - komutu telefondan verseniz bile ses robottan çıkar.
+  Future<void> speakHere(String text) => _postJson('/api/speak_here', {'text': text});
 }

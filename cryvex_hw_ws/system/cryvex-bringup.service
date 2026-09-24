@@ -1,0 +1,24 @@
+[Unit]
+Description=Cryvex - gercek donanim alt seviye baslatma (sensorler/motor/EKF/durum ekrani)
+After=network.target
+
+[Service]
+Type=simple
+User=main
+# STM32/YDLIDAR birer USB seri cihaz - acilisin en erken anlarinda /dev/cryvex_*
+# henuz olusmamis olabilir (udev kurallari calismasi biraz zaman alir). Sabit
+# bir cihaz-birimi bagimliligi (After=dev-....device) yerine kisa bir bekleme +
+# stm32_bridge/ydlidar node'larinin ZATEN CALISAN "cihaz yoksa hata logla ama
+# cokme" davranisina guvenmek daha saglam: cihaz sonradan takilirsa/hazir
+# olursa Restart=on-failure ile birkac saniyede bir yeniden dener.
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash && source /home/main/cryvex_hw_ws/install/setup.bash && exec ros2 launch cryvex_bringup hardware_bringup.launch.py'
+Restart=on-failure
+RestartSec=3
+# STM32/YDLIDAR gibi seri cihazlarla ugrasirken cikan HAL/SDK loglarini
+# journalctl -u cryvex-bringup -f ile takip edebilirsiniz.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

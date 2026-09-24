@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../api/robot_api.dart';
 import '../state/robot_state.dart';
 import '../theme.dart';
+import '../tts.dart';
 import '../widgets/joystick.dart';
 import '../widgets/password_sheet.dart';
 
@@ -27,6 +28,12 @@ class _JoystickScreenState extends State<JoystickScreen> {
   List<dynamic> _tables = [];
   bool _started = false;
   String? _mapUrlNonce;
+  // GUVENLIK AGI: haritalama baslatilip "Bitir"/"Vazgeç" DISINDA bir yoldan
+  // (Android geri tusu vb.) ekrandan cikilirsa slam_toolbox sonsuza kadar
+  // calisir durumda kalir, map_ready hep false doner ve dashboard'daki TUM
+  // devriye butonlari kilitli kalir - dispose() bu bayraga bakip gerekirse
+  // otomatik cancel_mapping cagirir.
+  bool _mappingConcluded = true;
 
   @override
   void initState() {
@@ -43,6 +50,10 @@ class _JoystickScreenState extends State<JoystickScreen> {
     _sendTimer?.cancel();
     _mapTimer?.cancel();
     _leave();
+    if (widget.mode == JoyMode.map && _started && !_mappingConcluded) {
+      _mappingConcluded = true;
+      _api.cancelMapping(kStopPassword);
+    }
     super.dispose();
   }
 
@@ -95,8 +106,12 @@ class _JoystickScreenState extends State<JoystickScreen> {
       return;
     }
     setState(() => _started = true);
-    if (widget.mode == JoyMode.map) _startLiveMap();
-    if (widget.mode == JoyMode.control) _loadTables();
+    if (widget.mode == JoyMode.map) {
+      _mappingConcluded = false; _startLiveMap();
+      speak(_api, 'Haritalamaya başlıyorum, beni sürebilirsiniz.');
+    }
+    if (widget.mode == JoyMode.rescue) speak(_api, 'Yardım için hazırım, beni sürebilirsiniz.');
+    if (widget.mode == JoyMode.control) { _loadTables(); speak(_api, 'Kontrol sizde.'); }
   }
 
   void _startLiveMap() {
@@ -151,24 +166,29 @@ class _JoystickScreenState extends State<JoystickScreen> {
   }
 
   Future<void> _onCancel() async {
+    _mappingConcluded = true;
     _leave();
     if (widget.mode == JoyMode.rescue) {
       await _api.rescueStop();
       _toast('Kurtarma bitti, görev kaldığı yerden devam ediyor.');
+      speak(_api, 'Görevime devam ediyorum.');
     } else if (widget.mode == JoyMode.control) {
       _toast('Kapatıldı (devriye otomatik başlamadı).');
     } else {
       await _api.cancelMapping(kStopPassword);
       _toast('Haritalamadan vazgeçildi.');
+      speak(_api, 'Haritalamadan vazgeçtim.');
     }
     if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _onFinish() async {
+    _mappingConcluded = true;
     if (widget.mode == JoyMode.rescue) {
       _leave();
       await _api.rescueStop();
       _toast('✅ Kurtarma tamam, robot görevine devam ediyor.');
+      speak(_api, 'Görevime devam ediyorum.');
       if (mounted) Navigator.of(context).pop();
       return;
     }
@@ -176,6 +196,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
       _leave();
       await _api.startPatrol();
       _toast('▶ Devriye başlatıldı.');
+      speak(_api, 'Devriyeye başlıyorum.');
       if (mounted) Navigator.of(context).pop();
       return;
     }
@@ -185,13 +206,16 @@ class _JoystickScreenState extends State<JoystickScreen> {
     setState(() => _busy = false);
     if (res['result'] != 'ok') {
       _toast('❌ Kaydedilemedi: ${res['reason'] ?? ''}');
+      _mappingConcluded = false;   // haritalama hala aktif, guvenlik agini yeniden etkinlestir
       _startLiveMap();
       return;
     }
     if (res['pose_captured'] != true) {
       _toast('⚠ Robot konumu otomatik alınamadı - Kurulum ekranında "Robot Burada" ile elle ayarlayın.');
+      speak(_api, 'Harita kaydedildi, konumumu elle ayarlamanız gerekiyor.');
     } else {
       _toast('✅ Harita kaydedildi! Şimdi masaları/kapıyı işaretleyin.');
+      speak(_api, 'Harita kaydedildi.');
     }
     if (mounted) Navigator.of(context).pop(true); // true = kuruluma yönlendir
   }

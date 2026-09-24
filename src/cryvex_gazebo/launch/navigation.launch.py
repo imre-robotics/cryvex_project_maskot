@@ -10,6 +10,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     gazebo_pkg_dir = get_package_share_directory('cryvex_gazebo')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
+    maps_dir = os.path.join(gazebo_pkg_dir, 'maps')
 
     # Varsayilanlar (gercek robotta:  use_sim_time:=false  map:=<yeni harita>)
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -57,10 +58,71 @@ def generate_launch_description():
         }.items(),
     )
 
+    # --- Nav2 Costmap Filters (2026-09-17, malzeme listesi rev.4 bolum 5/6) ---
+    # bringup_launch.py'nin KENDI lifecycle_manager'i bunlari bilmiyor -
+    # bu yuzden ayri, kucuk bir lifecycle_manager ile kendimiz yonetiyoruz
+    # (Nav2'nin resmi "costmap filters" ornek kurulumundaki yontem).
+    keepout_mask_server = Node(
+        package='nav2_map_server', executable='map_server',
+        name='filter_mask_server_keepout', output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time, 'frame_id': 'map',
+            'topic_name': '/keepout_filter_mask',
+            'yaml_filename': os.path.join(maps_dir, 'keepout_mask.yaml'),
+        }],
+    )
+    keepout_info_server = Node(
+        package='nav2_map_server', executable='costmap_filter_info_server',
+        name='costmap_filter_info_server_keepout', output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time, 'type': 0,
+            'filter_info_topic': '/keepout_filter_info',
+            'mask_topic': '/keepout_filter_mask',
+            'base': 0.0, 'multiplier': 1.0,
+        }],
+    )
+    speed_mask_server = Node(
+        package='nav2_map_server', executable='map_server',
+        name='filter_mask_server_speed', output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time, 'frame_id': 'map',
+            'topic_name': '/speed_filter_mask',
+            'yaml_filename': os.path.join(maps_dir, 'speed_mask.yaml'),
+        }],
+    )
+    speed_info_server = Node(
+        package='nav2_map_server', executable='costmap_filter_info_server',
+        name='costmap_filter_info_server_speed', output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time, 'type': 1,
+            'filter_info_topic': '/speed_filter_info',
+            'mask_topic': '/speed_filter_mask',
+            # scale modunda OccupancyGrid degeri (0-100) -> hiz yuzdesi:
+            # space = data*multiplier + base. Yaklasik, SAHADA dogrulanmali.
+            'base': 100.0, 'multiplier': -1.0,
+        }],
+    )
+    filters_lifecycle_manager = Node(
+        package='nav2_lifecycle_manager', executable='lifecycle_manager',
+        name='lifecycle_manager_costmap_filters', output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time, 'autostart': True,
+            'node_names': [
+                'filter_mask_server_keepout', 'costmap_filter_info_server_keepout',
+                'filter_mask_server_speed', 'costmap_filter_info_server_speed',
+            ],
+        }],
+    )
+
     return LaunchDescription([
         declare_use_sim_time,
         declare_map,
         declare_params,
         pc_to_laser,
         nav2_launch,
+        keepout_mask_server,
+        keepout_info_server,
+        speed_mask_server,
+        speed_info_server,
+        filters_lifecycle_manager,
     ])

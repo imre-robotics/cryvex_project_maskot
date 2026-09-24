@@ -28,7 +28,7 @@ endif()
 # ~/cryvex_ws/src/cryvex_gazebo/CMakeLists.txt içinde ament_package() üstüne:
 # Yeni hali:
 # Yeni hali:
-install(DIRECTORY launch rviz worlds maps web config DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch rviz worlds maps web config piper_voices DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
   scripts/patrol.py
   scripts/tablet_server.py

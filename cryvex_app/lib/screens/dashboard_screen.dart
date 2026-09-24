@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/robot_api.dart';
 import '../state/robot_state.dart';
 import '../theme.dart';
+import '../tts.dart';
 import '../widgets/password_sheet.dart';
 import 'connect_screen.dart';
 import 'joystick_screen.dart';
@@ -16,15 +18,32 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  int _volume = 50;
+  bool _volumeLoaded = false;
+  Timer? _volumeDebounce;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => context.read<RobotState>().startPolling());
+    _loadVolume();
+  }
+
+  Future<void> _loadVolume() async {
+    final v = await _api.getVolume();
+    if (mounted && v >= 0) setState(() { _volume = v; _volumeLoaded = true; });
+  }
+
+  void _onVolumeChanged(double v) {
+    setState(() => _volume = v.round());
+    _volumeDebounce?.cancel();
+    _volumeDebounce = Timer(const Duration(milliseconds: 200), () => _api.setVolume(_volume));
   }
 
   @override
   void dispose() {
     context.read<RobotState>().stopPolling();
+    _volumeDebounce?.cancel();
     super.dispose();
   }
 
@@ -45,6 +64,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!ok) return;
     await _api.stopPatrol();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Devriye durduruldu')));
+    speak(_api, 'Devriyeyi durdurdum.');
   }
 
   void _openJoystick(JoyMode mode) async {
@@ -75,16 +95,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 _statusCard(st),
+                const SizedBox(height: 12),
+                _volumeCard(),
                 const SizedBox(height: 18),
                 _sectionLabel('Devriye'),
                 _actionButton('🚀 Devriyeyi Başlat', CryvexButtonStyle.green,
-                    () => _requireMapReady(() => _api.startPatrol())),
+                    () => _requireMapReady(() { _api.startPatrol(); speak(_api, 'Devriyeye başlıyorum.'); })),
                 _actionButton('🚪 Karşılama (Kapıda, 3 dk)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() => _api.greetDoor())),
+                    () => _requireMapReady(() { _api.greetDoor(); speak(_api, 'Kapıda karşılamaya gidiyorum.'); })),
                 _actionButton('🎈 Sosyalleşme (Gezinme)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() => _api.wander())),
+                    () => _requireMapReady(() { _api.wander(); speak(_api, 'Kafede geziniyorum.'); })),
                 _actionButton('🏠 Üsse Dön', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() => _api.goHome())),
+                    () => _requireMapReady(() { _api.goHome(); speak(_api, 'Üsse dönüyorum.'); })),
                 _actionButton('🔒 Devriyeyi Durdur', CryvexButtonStyle.red, _stopPatrol),
                 const SizedBox(height: 18),
                 _sectionLabel('Manuel'),
@@ -116,6 +138,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.only(bottom: 10),
         child: SizedBox(width: double.infinity, child: ElevatedButton(style: style, onPressed: onTap, child: Text(label))),
       );
+
+  Widget _volumeCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: CryvexColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CryvexColors.cardLine),
+      ),
+      child: Row(children: [
+        const Icon(Icons.volume_up, color: CryvexColors.textMuted, size: 20),
+        Expanded(
+          child: Slider(
+            value: _volume.toDouble().clamp(0, 100),
+            min: 0, max: 100,
+            activeColor: CryvexColors.cyan,
+            onChanged: _volumeLoaded ? _onVolumeChanged : null,
+          ),
+        ),
+        SizedBox(width: 38, child: Text('$_volume%', textAlign: TextAlign.right,
+            style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5))),
+      ]),
+    );
+  }
 
   Widget _statusCard(RobotState st) {
     final dotColor = st.isLive ? CryvexColors.green : CryvexColors.amber;

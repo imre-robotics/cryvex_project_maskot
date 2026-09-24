@@ -1,0 +1,29 @@
+# Cryvex - USB seri port isimlerini SABITLER (Raspberry Pi USB sirasina/hangi
+# porta takildigina gore /dev/ttyACM0 <-> /dev/ttyACM1 veya /dev/ttyUSB0 <->
+# /dev/ttyUSB1 degisebilir - bu kurallar VID:PID'e gore SABIT bir isim verir,
+# hangi USB portuna takilirsa takilsin ayni isim gelir).
+#
+# KURULUM (gercek Pi 5'te, tek seferlik):
+#   sudo cp 99-cryvex-serial.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger
+#
+# hardware_bringup.launch.py / ydlidar_tmini_plus.yaml varsayilanlari bu
+# isimlere gore ayarlandi: /dev/cryvex_stm32, /dev/cryvex_lidar.
+
+# --- STM32 Nucleo-F446RE (ST-LINK/V2-1 uzerinden USB VCP) ---
+# VID:PID = 0483:374b, TUM Nucleo-64 kartlarinda (F446RE dahil) SABIT ve
+# iyi bilinen bir deger - simdiden guvenle yazilabilir, gercek karti
+# gormeye gerek yok.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", SYMLINK+="cryvex_stm32", MODE="0666", GROUP="dialout"
+
+# --- YDLIDAR T-mini Plus (USB-seri koprusu) ---
+# TODO: asagidaki idVendor/idProduct SATIRI DOGRULANMADI - YDLIDAR'in kendi
+# SDK dokumantasyonu bile VID:PID yerine fiziksel USB port yolunu (KERNELS)
+# onermis (cip modelden modele degisebiliyor). Cihaz eline gecince:
+#   1) lsusb                                          -> Silicon Labs/CP210x mi, CH340 mi vs. gor
+#   2) udevadm info -a -n /dev/ttyUSB0 | grep -E "idVendor|idProduct"
+#   3) asagidaki satiri o gercek degerlerle guncelle (cogu YDLIDAR modeli
+#      CP2102 kullanir - 10c4:ea60 - bu yuzden varsayilan olarak o yazildi,
+#      ama DOGRULA):
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="cryvex_lidar", MODE="0666", GROUP="dialout"

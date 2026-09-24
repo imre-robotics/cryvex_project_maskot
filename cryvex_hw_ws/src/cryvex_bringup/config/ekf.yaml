@@ -1,0 +1,40 @@
+# robot_localization EKF - teker odometrisi + IMU donus hizini birlestirir,
+# AMCL/Nav2'ye daha duzgun bir odom->base_footprint TF verir.
+#
+# odom0 (teker odometrisi) 2026-09-18'den itibaren GERCEK: motor surucu
+# DM556 (STEP/DIR, geri beslemesiz) oldu - stm32_bridge.py artik STM32'nin
+# KENDI komutladigi step sayisindan ACIK CEVRIM (open-loop) x/y/yaw+hiz
+# hesaplayip /wheel/odom yayinliyor (bkz. stm32_bridge.py dosya basi notu).
+# "Acik cevrim" = gercek pozisyon degil TAHMIN - adim kaybi olursa sessizce
+# sapar; bu EKF'nin ve AMCL'in (LiDAR) tam olarak bunun icin var oldugu yer.
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true            # robot duz zeminde, z/roll/pitch onemsiz
+    print_diagnostics: true
+    publish_tf: true
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom            # bu EKF sadece odom->base_footprint icin - map->odom AMCL'in isi
+
+    # ---- teker odometrisi (acik cevrim, bkz. yukaridaki NOT) ----
+    odom0: /wheel/odom
+    odom0_config: [true,  true,  false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+
+    # ---- IMU (stm32_bridge.py zaten yayinliyor - sadece Z ekseni donus hizi) ----
+    imu0: /imu/data_raw
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: true          # mutlak yon bilgisi yok, sadece donus HIZI guveniliyor
+    imu0_remove_gravitational_acceleration: true

@@ -112,6 +112,9 @@ bt_navigator_navigate_to_pose_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: True
+    # speed_filter (local_costmap) BURAYA yayinlar - varsayilan zaten "speed_limit"
+    # ama iki ucun ayni ismi kullandigini acikca belli etmek icin yazildi.
+    speed_limit_topic: "speed_limit"
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
@@ -149,10 +152,18 @@ controller_server:
       min_speed_xy: 0.0
       max_speed_xy: 0.40
       min_speed_theta: 0.0
-      acc_lim_x: 1.2
+      # 2026-09-17: malzeme listesi rev.4 bolum 7 "Guvenlik" ile hizalandi -
+      # "hizlanma limiti ~0,3 m/s^2" ve "1 m boyundaki robot ani frende
+      # one yatabilir, hizlanma VE yavaslamayi sinirlayin" uyarisi. Eskiden
+      # acc_lim_x=1.2/decel_lim_x=-2.0 idi (Gazebo'da hicbir devrilme fizigi
+      # simule edilmedigi icin sinanmamis, sadece "hizli tepki versin" diye
+      # yuksek birakilmisti) - gercek robotta bu deger fiziksel devrilme
+      # riski tasiyordu. ACC_LIM ve DECEL_LIM ikisi de dusuruldu (sadece
+      # hizlanma degil, doc'un ozellikle belirttigi gibi FRENLEME de).
+      acc_lim_x: 0.3
       acc_lim_y: 0.0
       acc_lim_theta: 2.0
-      decel_lim_x: -2.0        # frene daha hizli bas (biri onune cikinca)
+      decel_lim_x: -0.4        # -2.0'dan dusuruldu - ani frende one yatmayi onler
       decel_lim_y: 0.0
       decel_lim_theta: -2.5
       vx_samples: 20
@@ -200,8 +211,20 @@ local_costmap:
       height: 3
       resolution: 0.05
       robot_radius: 0.35            # hoverboard-teker robot (~0.35 m). Gercek olcuye ayarla.
-      # denoise_layer tek-piksel LiDAR parazitini siler (hayalet engel / bosuna durma olmaz)
-      plugins: ["obstacle_layer", "denoise_layer", "inflation_layer"]
+      # denoise_layer tek-piksel LiDAR parazitini siler (hayalet engel / bosuna durma olmaz).
+      # keepout_filter + speed_filter: 2026-09-17 eklendi (malzeme listesi rev.4
+      # bolum 5/6) - maskeler + filter server node'lari icin bkz. navigation.launch.py.
+      plugins: ["obstacle_layer", "denoise_layer", "keepout_filter", "speed_filter", "inflation_layer"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: True
+        filter_info_topic: "/keepout_filter_info"
+      speed_filter:
+        plugin: "nav2_costmap_2d::SpeedFilter"
+        enabled: True
+        filter_info_topic: "/speed_filter_info"
+        # speed_limit_topic verilmedi - hem burasi hem controller_server ayni
+        # varsayilani ("/speed_limit") kullanir.
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -256,7 +279,14 @@ global_costmap:
       robot_radius: 0.35
       resolution: 0.05
       track_unknown_space: true
-      plugins: ["static_layer", "obstacle_layer", "denoise_layer", "inflation_layer"]
+      # keepout_filter: masalarin GERCEK govde/tabla izdusumunu (LiDAR'in tek
+      # kesitte gormedigi kismi da dahil) global planlayicidan gizler -
+      # bkz. maps/keepout_mask.yaml + navigation.launch.py'deki filter server'lar.
+      plugins: ["static_layer", "obstacle_layer", "denoise_layer", "keepout_filter", "inflation_layer"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: True
+        filter_info_topic: "/keepout_filter_info"
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -370,8 +400,8 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     max_velocity: [0.40, 0.0, 1.2]
     min_velocity: [-0.30, 0.0, -1.2]
-    max_accel: [1.2, 0.0, 2.0]
-    max_decel: [-2.0, 0.0, -2.5]
+    max_accel: [0.3, 0.0, 2.0]   # FollowPath.acc_lim_x ile ayni (bkz. yukaridaki not)
+    max_decel: [-0.4, 0.0, -2.5]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

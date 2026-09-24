@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<!--
+  Cryvex gercek robot - MINIMAL iskelet URDF.
+
+  Amaci gorsellik (RViz) degil, TF agacini TAMAMLAMAK: Nav2/SLAM, /scan'in
+  geldigi lidar_link ile robotun govde cercevesi (base_link/base_footprint)
+  arasinda sabit bir donusum OLMADAN calismaz ("could not transform" hatasi
+  ile aninda durur). Bu dosya olmadan gercek robotta navigation.launch.py/
+  mapping.launch.py ilk denemede patlar - Aşama 4 baslamadan once bu yuzden
+  simdiden eklendi.
+
+  ASAGIDAKI OLCULER YER TUTUCUDUR (gercek olculmedi, kasa/govde henuz
+  kurulmadi) - tek yapilmasi gereken sasi fiziksel olarak kurulunca bu 3
+  xacro property'sini gercek degerlerle degistirmek, TF agacinin YAPISI
+  (parent/child iliskileri) degismeyecek:
+    - base_height          : zeminden base_link'e (govde merkezi) yukseklik
+    - lidar_height          : base_link'ten lidar_link'e yukseklik
+    - footprint_radius      : govdenin en genis yeri / 2 (nav2_params.yaml
+                               robot_radius ile AYNI TUTULMALI)
+
+  lidar_height ONERISI: T-mini Plus'i masa/sandalye AYAKLARINI gorecek kadar
+  ALCAK monte edin (~0.20-0.30 m zeminden) - cok yuksek monte edilirse masa
+  tablasinin ustunden gecen taramalar bacaklari/tabure ayaklarini kacirir,
+  bu da patrol.py'nin HC-SR04 destekli kacinmasina asiri yuk bindirir.
+-->
+<robot name="cryvex_real" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:property name="footprint_radius" value="0.35"/>
+  <xacro:property name="base_height" value="0.12"/>
+  <xacro:property name="lidar_height" value="0.22"/>  <!-- malzeme listesi rev.4, bolum 5: "yerden ~20-30 cm" -->
+
+
+  <material name="cryvex_dark">
+    <color rgba="0.08 0.08 0.10 1.0"/>
+  </material>
+  <material name="cryvex_cyan">
+    <color rgba="0.0 0.7 0.85 1.0"/>
+  </material>
+
+  <!-- REP-120: base_footprint zeminin izdüşümü, gercek gövde base_link -->
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${footprint_radius}" length="${base_height}"/>
+      </geometry>
+      <material name="cryvex_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${footprint_radius}" length="${base_height}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- YDLIDAR T-mini Plus - config/ydlidar_tmini_plus.yaml frame_id ile AYNI isim -->
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.04"/>
+      </geometry>
+      <material name="cryvex_cyan"/>
+    </visual>
+  </link>
+
+  <joint name="base_link_to_lidar" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 ${lidar_height}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- MPU6050 - stm32_bridge.py sadece Z ekseni acisal hizini yayinliyor,
+       konum onemsiz; kart DUZ (Z yukari) monte edilmezse buraya rpy eklenmeli. -->
+  <link name="imu_link"/>
+
+  <joint name="base_link_to_imu" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

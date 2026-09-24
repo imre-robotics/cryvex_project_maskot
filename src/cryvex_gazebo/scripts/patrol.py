@@ -236,10 +236,24 @@ class CommandListener(Node):
                 self.get_logger().info('KOMUT: Devriye BASLAT')
 
         elif cmd == 'stop':
+            # ACIL STOP > telefon > otonom oncelik zincirinin (malzeme listesi
+            # rev.4 bolum 2.3) yazilim tarafi burada uygulanir - ayri bir
+            # twist_mux node'una GEREK YOK: patrol.py zaten /cmd_vel'e YAZAN
+            # TEK yer, o yuzden 'stop' RESCUE/TELEOP dahil HER SEYI kesmezse
+            # oncelik zinciri gercekte calismaz. 2026-09-17'ye kadar bu
+            # eksikti: 'stop' sadece state'i IDLE yapiyordu, rescue_active
+            # AKTIF KALIYORDU - yani garson kurtarma joystick'iyle surerken
+            # biri STOP'a basarsa robot DURMUYORDU (rescue_active=True oldugu
+            # surece _rescue_maneuver kendi dongusunde donmeye devam ediyordu).
             self.state = STATE_IDLE
             self.interacting = False
             self.wait_remaining = 0.0
-            self.get_logger().info('KOMUT: DURDUR')
+            self.rescue_active = False
+            self.rescue_lx = 0.0
+            self.rescue_az = 0.0
+            self.teleop_lx = 0.0
+            self.teleop_az = 0.0
+            self.get_logger().info('KOMUT: DURDUR (rescue/teleop dahil hepsi kesildi)')
 
         elif cmd == 'wander':
             if not busy_with_order:
