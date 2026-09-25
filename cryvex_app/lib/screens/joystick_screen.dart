@@ -200,6 +200,25 @@ class _JoystickScreenState extends State<JoystickScreen> {
       if (mounted) Navigator.of(context).pop();
       return;
     }
+    // "Bitir" eski haritanin ve masalarin USTUNE yazar - once sor (sunucu
+    // eskisini ayrica yedekler ama yanlislikla basilmasin).
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Haritayı kaydet?'),
+        content: const Text('Yeni harita eskisinin yerine geçecek.\n\n'
+            'Masa, kapı ve barmen noktaları SİLİNİR; yeni haritada yeniden işaretlemen gerekir. '
+            '(Eski harita yedeklenir.)'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Vazgeç')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Evet, kaydet')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) {
+      _mappingConcluded = false; // haritalama suruyor, guvenlik agi yeniden etkin
+      return;
+    }
     setState(() => _busy = true);
     _leave();
     final res = await _api.finishMapping(kStopPassword);

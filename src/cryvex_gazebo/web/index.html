@@ -1639,7 +1639,21 @@
             closeOverlay();
         });
 
+        // "Bitir" eski haritanin ve masalarin USTUNE yazar - ilk dokunusta buton
+        // uyariya donusur, 4 sn icinde ikinci dokunus kaydeder (yanlislikla
+        // kaydedip iyi haritayi kaybetmeyelim; sunucu eskisini ayrica yedekler).
+        let finishArmedTimer = null;
+        function disarmFinish() {
+            clearTimeout(finishArmedTimer); finishArmedTimer = null;
+            applyJoyText();
+        }
         $('btn-finish-mapping').addEventListener('click', async () => {
+            if (joyMode === 'map' && !finishArmedTimer) {
+                $('btn-finish-mapping-label').textContent = 'Emin misin? Masalar silinir — tekrar dokun';
+                finishArmedTimer = setTimeout(disarmFinish, 4000);
+                return;
+            }
+            if (finishArmedTimer) disarmFinish();
             mappingConcluded = true;
             if (joyMode === 'rescue') {
                 leaveMappingView();

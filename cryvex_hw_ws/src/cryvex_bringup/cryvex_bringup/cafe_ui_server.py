@@ -1,31 +1,29 @@
 #!/usr/bin/env python3
 """
-Cryvex Kafe Arayuzu - gercek donanim (Asama 4'un ERKEN/KISMI portu)
-=====================================================================
+Cryvex Kafe Arayuzu - gercek donanim
+====================================
 ~/cryvex_ws/src/cryvex_gazebo/web/index.html'i (goz animasyonlari, sanal
-joystick, "Ortami Haritala" akisi) DEGISTIRMEDEN, gercek donanimda sunar.
-patrol.py'nin TAM durum makinesi (masalar, siparis, mesajlasma, devriye)
-HENUZ yok - motor/STM32 gelmeden bunlarin bir anlami olmadigi icin bilincli
-olarak SIMDILIK STUB birakildi:
+joystick, "Ortami Haritala" akisi) gercek donanimda sunar; sim'deki
+tablet_server.py'nin gercek robot karsiligi.
 
-  - /api/status: sabit "idle" durumu doner (gozler normal gorunur, ekran acik) -
-    devriye/siparis/mesaj alanlari hep bos/kapali.
-  - /api/start_patrol, /wander, /goto, /rescue_* vb. (patrol.py'ye ozel
-    komutlar): /patrol_command'a yayinlanir (DINLEYEN YOK, zararsiz) ve
-    {'result':'ok'} doner - butonlar hata GOSTERMEZ ama gercek bir sey de
-    YAPMAZ (motor yok).
-  - /api/teleop, /start_mapping, /finish_mapping, /cancel_mapping,
-    /live_map.png: GERCEK calisir (LiDAR+slam_toolbox+/cmd_vel gercek).
-  - /setup (masa/kapi/barmen noktalarini isaretleme) + /api/waypoints: GERCEK
-    calisir (tablet_server.py'den birebir portlandi, 2026-09-24).
+  - Devriye beyni (patrol.py, 2026-09-25'te tasindi): telefon/ekran komutlari
+    (/api/start_patrol, /goto, /place_order, /rescue_*, /send_message ...)
+    sim ile AYNI duz metin komutlarina cevrilip /patrol_command'a gider,
+    /patrol_status (JSON) /api/status ile arayuze doner. patrol.py yoksa
+    /api/status "idle" yedegini doner (goz animasyonu yine calisir).
+  - Nav2 <-> haritalama (LaunchManager): kayitli harita varsa acilista Nav2
+    (AMCL + surus) baslar; "Ortami Haritala" slam_toolbox'a gecer, Bitir/
+    Vazgec Nav2'ye doner. Ikisi ASLA ayni anda calismaz (/map + map->odom catisir).
+  - Robotun haritadaki konumu da burada: son AMCL konumu config/last_pose.json'a
+    kaydedilir, Nav2 her acildiginda (ayni haritaysa) geri verilir; haritalama
+    bitince SLAM'in son konumu verilir; "Robot Burada" (/api/set_pose) ve
+    "Robotu use sabitle" (/api/relocalize) elle ayar.
+  - /live_map.png (1 m izgarali, canli LiDAR), /setup + /api/waypoints.
   - /api/tts_audio + /api/speak_here: robotun TEK sesi (edge-tts, kadin).
     Uretilen her cumle KALICI onbellege yazilir ve arayuzun sabit cumleleri
     internet gelir gelmez onceden uretilir - acilista internet/saat henuz
-    hazir degilken de robot hep ayni sesle konusur.
-
-Motor/STM32 baglaninca ve patrol.py gercek donanima portlaninca bu dosyanin
-stub kisimlari GERCEK patrol_status/is_configured mantigiyla degisecek -
-index.html'de TEK SATIR degisiklik gerekmeyecek (zaten aynen kullaniliyor).
+    hazir degilken de robot hep ayni sesle konusur. patrol.py'nin sesli
+    mesajlari (say) da bu yoldan robotun kendi ekraninda okunur.
 """
 import ast
 import asyncio
@@ -35,6 +33,7 @@ import json
 import math
 import os
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -69,6 +68,31 @@ OPERATOR_PASSWORD = '1234'  # index.html/Flutter app ile AYNI (sim ile tutarli)
 MAP_QOS = QoSProfile(
     depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
     reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST)
+
+MAP_BACKUP_KEEP = 10  # "Bitir" oncesi yedeklenen eski haritalardan kac tanesi tutulsun
+
+# GECICI: STM32/motor yokken EKF odom TF'i yayinlamiyor; Nav2'ye sabit odom
+# verilir (bkz. navigation.launch.py fake_odom). STM32 baglaninca False yapin
+# (mapping.launch.py'deki static_odom_tf ile birlikte kaldirilacak).
+FAKE_ODOM = True
+
+PATROL_STATUS_FRESH_S = 3.0   # bu kadar eski /patrol_status = patrol.py yok sayilir
+
+# Govdesiz arayuz uclari -> patrol.py komutu (sim tablet_server.py ile AYNI)
+PATROL_SIMPLE_COMMANDS = {
+    '/api/start_patrol': 'start',
+    '/api/go_home': 'go_home',
+    '/api/wander': 'wander',
+    '/api/greet_door': 'greet_door',
+    '/api/resume_patrol': 'resume',
+    '/api/interacting': 'interacting',
+    '/api/done_interacting': 'done_interacting',
+    '/api/msg_open': 'msg_open',
+    '/api/msg_compose_start': 'msg_compose_start',
+    '/api/msg_compose_cancel': 'msg_compose_cancel',
+    '/api/rescue_stop': 'rescue_stop',
+}
+LAST_POSE_SAVE_S = 5.0        # son AMCL konumu en fazla bu siklikta diske yazilir
 
 JOY_MAX_LIN = 0.30
 JOY_MAX_ANG = 1.00
@@ -334,42 +358,61 @@ def set_volume_pct(pct):
 
 
 class LaunchManager:
-    """mapping.launch.py'yi baslatir/durdurur (tablet_server.py deseninin
-    sadelesmis hali - Nav2 tarafi henuz otomatik tetiklenmiyor, bilinçli)."""
+    """Nav2 (navigation.launch.py: AMCL + surus) ile canli haritalama
+    (mapping.launch.py: slam_toolbox) SIRAYLA calisir, ASLA ayni anda degil -
+    ikisi de /map + map->odom TF yayinlar, birlikte catisir (2026-09-25'te
+    konum testi acikken haritalama acilinca LiDAR noktalari duvarlardan
+    kaydi). Hangisinin ayakta oldugunu TEK YERDEN yonetir; her biri kendi
+    surec grubunda, gecerken digeri temiz kapatilir (sim tablet_server deseni)."""
 
     def __init__(self, node):
         self.node = node
         self.proc = None
+        self.kind = None   # 'nav' | 'slam' | None
         self._lock = threading.Lock()
 
-    def is_running(self):
-        return self.proc is not None and self.proc.poll() is None
+    def is_running(self, kind=None):
+        alive = self.proc is not None and self.proc.poll() is None
+        return alive and (kind is None or self.kind == kind)
+
+    def _stop_locked(self):
+        if self.proc is not None and self.proc.poll() is None:
+            pid = self.proc.pid
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGINT)
+                self.proc.wait(timeout=10.0)
+            except Exception:  # noqa: BLE001
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    self.proc.wait(timeout=3.0)
+                except Exception:  # noqa: BLE001
+                    pass
+            self.node.get_logger().info(f"[LaunchManager] '{self.kind}' durduruldu.")
+        self.proc = None
+        self.kind = None
 
     def stop(self):
         with self._lock:
-            if self.proc is None:
-                return
-            if self.proc.poll() is None:
-                pid = self.proc.pid
-                try:
-                    os.killpg(os.getpgid(pid), signal.SIGINT)
-                    self.proc.wait(timeout=8.0)
-                except Exception:  # noqa: BLE001
-                    try:
-                        os.killpg(os.getpgid(pid), signal.SIGKILL)
-                        self.proc.wait(timeout=3.0)
-                    except Exception:  # noqa: BLE001
-                        pass
-            self.proc = None
-            self.node.get_logger().info('[LaunchManager] Haritalama durduruldu.')
+            self._stop_locked()
 
     def start_slam(self):
         with self._lock:
-            if self.proc is not None and self.proc.poll() is None:
+            if self.is_running('slam'):
                 return
+            self._stop_locked()
             self.node.get_logger().info('[LaunchManager] Haritalama (slam_toolbox) basliyor...')
             cmd = ['ros2', 'launch', 'cryvex_bringup', 'mapping.launch.py']
             self.proc = subprocess.Popen(cmd, start_new_session=True)
+            self.kind = 'slam'
+
+    def start_nav(self, map_yaml):
+        with self._lock:
+            self._stop_locked()
+            self.node.get_logger().info(f'[LaunchManager] Nav2 (AMCL + surus) basliyor: {map_yaml}')
+            cmd = ['ros2', 'launch', 'cryvex_bringup', 'navigation.launch.py',
+                   f'map:={map_yaml}', f'fake_odom:={"true" if FAKE_ODOM else "false"}']
+            self.proc = subprocess.Popen(cmd, start_new_session=True)
+            self.kind = 'nav'
 
 
 class CafeUiServerNode(Node):
@@ -407,19 +450,33 @@ class CafeUiServerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.command_pub = self.create_publisher(String, '/patrol_command', 10)  # dinleyen yok, zararsiz
+        self.command_pub = self.create_publisher(String, '/patrol_command', 10)
         self.initialpose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
         self.nomotion_cli = self.create_client(Empty, '/request_nomotion_update')
         self.launch_mgr = LaunchManager(self)
+
+        # patrol.py'nin durumu (JSON) + robotun kendi ekraninda okunacak mesajlari
+        self._patrol_status, self._patrol_rx = None, 0.0
+        self._patrol_speak_seq = None
+        self.create_subscription(String, '/patrol_status', self._patrol_status_cb, 10)
+        # Son AMCL konumu -> config/last_pose.json (robot kapanip ayni yerde
+        # acilinca kendini bilsin; "Robot Burada"ya gerek kalmasin)
+        self._last_pose_saved = (None, 0.0)   # ((x, y, yaw), zaman)
+        self._amcl_rx_t = 0.0                 # son /amcl_pose (monotonic)
+        self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self._amcl_pose_cb, MAP_QOS)
 
         self._httpd = ThreadingHTTPServer(('0.0.0.0', port), self._make_handler())
         self._http_thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._http_thread.start()
         threading.Thread(target=self._prewarm_tts, daemon=True).start()
-        self.get_logger().info(f'Kafe arayuzu (bench) hazir: http://0.0.0.0:{port}/')
-        self.get_logger().warn(
-            'BU BIR ARA SURUM: patrol.py/motor henuz yok - devriye/siparis/mesaj '
-            'butonlari hicbir sey yapmaz (hata da vermez), sadece haritalama+joystick GERCEK calisir.')
+        self.get_logger().info(f'Kafe arayuzu hazir: http://0.0.0.0:{port}/')
+        # Kayitli harita varsa Nav2'yi (AMCL + surus) hemen baslat; yoksa
+        # "Ortami Haritala" beklenir. Masalar tanimli olmasa da baslar - kurulum
+        # ekranindaki "Robot Burada" AMCL'e ihtiyac duyar.
+        if self.has_saved_map():
+            self.start_nav_and_localize()
+        else:
+            self.get_logger().warn('Kayitli harita yok - Nav2 baslatilmadi, "Ortami Haritala" bekleniyor.')
 
     def _prewarm_tts(self):
         # Arayuzun sabit cumleleri internet gelir gelmez kalici onbellege
@@ -495,6 +552,149 @@ class CafeUiServerNode(Node):
                 self.nomotion_cli.call_async(Empty.Request())
             time.sleep(0.3)
 
+    # ---- Nav2 + robotun haritadaki konumu ----
+    def active_map_yaml_path(self):
+        return os.path.join(self.maps_dir, 'cafe_map.yaml')
+
+    def _map_stamp(self):
+        """Kayitli haritanin kimligi: yeniden haritalayinca degisir, boylece
+        eski haritaya ait kayitli konum yeni haritada kullanilmaz."""
+        try:
+            return f'{os.path.getmtime(self.active_map_yaml_path()):.0f}'
+        except OSError:
+            return None
+
+    def _last_pose_path(self):
+        return os.path.join(self.config_dir, 'last_pose.json')
+
+    def _amcl_pose_cb(self, msg):
+        self._amcl_rx_t = time.monotonic()
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        (prev, prev_t) = self._last_pose_saved
+        now = time.monotonic()
+        if prev is not None and (now - prev_t < LAST_POSE_SAVE_S or (
+                math.hypot(p.x - prev[0], p.y - prev[1]) < 0.05
+                and abs(math.remainder(yaw - prev[2], math.tau)) < math.radians(3))):
+            return
+        self._last_pose_saved = ((p.x, p.y, yaw), now)
+        data = {'x': round(p.x, 3), 'y': round(p.y, 3), 'yaw': round(yaw, 4), 'map': self._map_stamp()}
+        try:
+            tmp = self._last_pose_path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f)
+            os.replace(tmp, self._last_pose_path())
+        except OSError as e:
+            self.get_logger().warn(f'last_pose.json yazilamadi: {e}')
+
+    def load_last_pose(self):
+        try:
+            with open(self._last_pose_path(), encoding='utf-8') as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if d.get('map') != self._map_stamp():
+            return None   # baska bir haritaya ait (yeniden haritalandi)
+        return float(d['x']), float(d['y']), float(d['yaw'])
+
+    def start_nav_and_localize(self, pose=None):
+        """Nav2'yi kayitli haritayla baslatir ve AMCL hazir olunca robotun
+        konumunu verir: pose (haritalama sonrasi SLAM'in son konumu) ya da
+        son kaydedilen konum. Ikisi de yoksa "Robot Burada" ile elle verilir -
+        Nav2'nin surus kismi konum gelene kadar beklemede kalir."""
+        self.launch_mgr.start_nav(self.active_map_yaml_path())
+        pose = pose or self.load_last_pose()
+        if pose is None:
+            self.get_logger().warn('Bilinen robot konumu yok - kurulum ekranindan "Robot Burada" ile verin.')
+            return
+        threading.Thread(target=self._localize_when_ready, args=(pose,), daemon=True).start()
+
+    def _localize_when_ready(self, pose):
+        # AMCL /initialpose'a abone olsa bile AKTIF olana kadar gelen konumu yok
+        # sayar - bu yuzden AMCL'in cevap olarak /amcl_pose yayinladigini
+        # gorene kadar tekrarlanir (Pi'de Nav2'nin acilmasi ~15-30 sn).
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline and self.launch_mgr.is_running('nav'):
+            if self.initialpose_pub.get_subscription_count() > 0:
+                sent = time.monotonic()
+                try:
+                    self.set_robot_pose(*pose)
+                except RuntimeError:
+                    pass
+                time.sleep(2.5)
+                if self._amcl_rx_t > sent:
+                    self.get_logger().info(
+                        f'Robot konumu verildi: x={pose[0]:.2f} y={pose[1]:.2f} yaw={math.degrees(pose[2]):.0f}°')
+                    return
+            else:
+                time.sleep(1.0)
+        self.get_logger().warn('Robot konumu AMCL\'e verilemedi (Nav2 acilmadi?) - "Robot Burada" ile verin.')
+
+    def _capture_slam_pose(self):
+        """Haritalama BITMEDEN (slam_toolbox hala ayaktayken) robotun o anki
+        konumu: yeni haritanin cercevesinde, AMCL'e baslangic olarak verilir."""
+        try:
+            tf = self.tf_buffer.lookup_transform('map', 'base_footprint', RclpyTime())
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn(f'Robot konumu SLAM\'den okunamadi ({e}).')
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return t.x, t.y, yaw
+
+    def relocalize_to_home(self):
+        """"Robotu use sabitle": robotu barmen noktasinda kabul et (elle istenirse)."""
+        b = self.load_waypoints_cfg().get('barista')
+        if not b:
+            raise RuntimeError('barmen noktasi tanimli degil')
+        self.set_robot_pose(float(b['x']), float(b['y']), float(b.get('yaw', 0.0)))
+
+    # ---- patrol.py (devriye beyni) ----
+    def missing_target(self, path, table=None):
+        """Gorev komutu yapilamiyorsa arayuze gosterilecek sebep (yoksa None).
+        patrol.py da ayni kontrolu yapar ve robotta sesli soyler; bu, telefona
+        aninda anlasilir bir hata donmesi icin."""
+        if path not in ('/api/start_patrol', '/api/wander', '/api/go_home',
+                        '/api/greet_door', '/api/goto'):
+            return None
+        if self.mode in ('mapping', 'tagging'):
+            return 'Kurulum sürüyor: önce haritayı bitirip noktaları kaydedin'
+        cfg = self.load_waypoints_cfg()
+        tables = cfg.get('tables') or []
+        if path in ('/api/start_patrol', '/api/wander') and not tables:
+            return 'Masalar kurulumda tanımlı değil'
+        if path == '/api/go_home' and not cfg.get('barista'):
+            return 'Barmen noktası kurulumda tanımlı değil'
+        if path == '/api/greet_door' and not cfg.get('door'):
+            return 'Kapı kurulumda tanımlı değil'
+        if path == '/api/goto' and not 1 <= (table or 0) <= len(tables):
+            return f'Masa {table} kurulumda tanımlı değil'
+        return None
+
+    def publish_patrol(self, cmd):
+        self.command_pub.publish(String(data=cmd))
+        self.get_logger().info(f'patrol komutu: {cmd[:80]}')
+
+    def patrol_alive(self):
+        return self._patrol_status is not None and time.monotonic() - self._patrol_rx < PATROL_STATUS_FRESH_S
+
+    def _patrol_status_cb(self, msg):
+        try:
+            status = json.loads(msg.data)
+        except ValueError:
+            return
+        self._patrol_status, self._patrol_rx = status, time.monotonic()
+        # patrol.py'nin sesli mesajlari (say) robotun KENDI ekraninda, ayni
+        # kadin sesiyle okunsun: sunucunun konusma sirasina aktarilir.
+        seq = status.get('speak_seq', 0)
+        if self._patrol_speak_seq is None:
+            self._patrol_speak_seq = seq     # ilk mesaj: eski konusmayi tekrar okuma
+        elif seq != self._patrol_speak_seq:
+            self._patrol_speak_seq = seq
+            text = (status.get('speak_text') or '').strip()
+            if text:
+                threading.Thread(target=self.request_robot_speech, args=(text, ''), daemon=True).start()
+
     def map_info(self):
         info = {'resolution': 0.05, 'origin': [0.0, 0.0, 0.0], 'image': 'cafe_map.pgm'}
         yaml_path = os.path.join(self.maps_dir, 'cafe_map.yaml')
@@ -558,9 +758,34 @@ class CafeUiServerNode(Node):
         # (SLAM haritayi farkli bir orijine gore cizer) - kurulum ekrani BOS acilsin.
         self.save_waypoints_cfg({'barista': None, 'door': None, 'tables': []})
 
+    def _backup_current_map(self):
+        """"Bitir" eski haritanin ve masalarin USTUNE yazar (2026-09-25'te iyi bir
+        harita 12 saniyelik bir denemeyle boyle kayboldu). Once maps/yedek/NNN-tarih/
+        altina kopyalanir, en yeni MAP_BACKUP_KEEP tanesi tutulur. Sira numarasi
+        tarihten bagimsiz: Pi acilista saati gec ayarlayabiliyor (RTC pili yok)."""
+        files = [os.path.join(self.maps_dir, n) for n in ('cafe_map.yaml', 'cafe_map.pgm')]
+        if not all(os.path.isfile(p) for p in files):
+            return
+        backup_root = os.path.join(self.maps_dir, 'yedek')
+        os.makedirs(backup_root, exist_ok=True)
+        existing = sorted(d for d in os.listdir(backup_root) if re.match(r'^\d{3}-', d))
+        seq = int(existing[-1][:3]) + 1 if existing else 1
+        dest = os.path.join(backup_root, f'{seq % 1000:03d}-{time.strftime("%Y%m%d-%H%M%S")}')
+        os.makedirs(dest)
+        for path in files + [self._waypoints_path()]:
+            if os.path.isfile(path):
+                shutil.copy2(path, dest)
+        for old in existing[:max(0, len(existing) + 1 - MAP_BACKUP_KEEP)]:
+            shutil.rmtree(os.path.join(backup_root, old), ignore_errors=True)
+        self.get_logger().info(f'Eski harita + masalar yedeklendi: {dest}')
+
     def finish_mapping(self):
+        """Haritayi kaydet, Nav2'ye don. Donus: robotun konumu SLAM'den
+        yakalanip AMCL'e verildi mi (False -> kurulumda "Robot Burada")."""
         if self._live_map_msg is None:
             raise RuntimeError('Henuz canli harita verisi yok - biraz daha surup dolasin.')
+        captured_pose = self._capture_slam_pose()   # slam_toolbox HALA ayaktayken
+        self._backup_current_map()
         map_path_noext = os.path.join(self.maps_dir, 'cafe_map')
         cmd = ['ros2', 'run', 'nav2_map_server', 'map_saver_cli',
                '-t', '/map', '-f', map_path_noext,
@@ -571,8 +796,12 @@ class CafeUiServerNode(Node):
         self.get_logger().info('Harita diske kaydedildi (cafe_map.pgm/.yaml).')
         self._map_png_cache = None
         self.reset_waypoints_cfg()
-        self.launch_mgr.stop()
-        self.mode = 'operating'
+        self.publish_patrol('reload_waypoints')   # eski masalar yeni haritada anlamsiz
+        self.start_nav_and_localize(captured_pose)
+        # Kurulum ekrani "Kaydet"e basana kadar 'tagging': patrol.py devriyeyi
+        # kilitli tutar (mapping_done orada gonderilir) - sim ile ayni akis.
+        self.mode = 'tagging'
+        return captured_pose is not None
 
     def publish_cmd(self, lx, az):
         lx = max(-JOY_MAX_LIN, min(JOY_MAX_LIN, float(lx)))
@@ -589,22 +818,29 @@ class CafeUiServerNode(Node):
             self.speak_seq += 1
 
     def status_payload(self):
-        # patrol.py'nin publish_status_now() ile AYNI anahtarlar - index.html/
-        # Flutter app bunlari bekliyor. Motor/patrol yok, hepsi "bos/idle" -
-        # goz animasyonu normal (dinlenme) durumunda gorunur, hata vermez.
-        stub = {
+        # patrol.py'nin publish_status_now() anahtarlari - index.html/Flutter
+        # app bunlari bekliyor. patrol.py calismiyorsa "idle" yedegi (goz
+        # animasyonu normal durumda gorunur, hata vermez).
+        status = {
             'state': 'idle', 'waypoint': None, 'table_index': -1,
             'wait_total': 0.0, 'wait_remaining': 0.0,
             'interacting': False, 'greeting': False, 'cute': False,
-            'screen_on': self.screen_on, 'speak_text': self.speak_text,
-            'speak_seq': self.speak_seq, 'speak_expr': self.speak_expr,
-            'order': None,
+            'screen_on': False, 'order': None,
             'msg_phase': None, 'msg_from': None, 'msg_to': None, 'msg_text': None,
             'msg_total': 0.0, 'msg_remaining': 0.0, 'msg_composing': False,
-            'map_ready': not self.launch_mgr.is_running(),
+            'map_ready': not self.launch_mgr.is_running('slam'),
             'rescue_active': False,
         }
-        return {'status': json.dumps(stub), 'count': 1, 'age': 0.1}
+        alive = self.patrol_alive()
+        if alive:
+            status.update(self._patrol_status)
+        # Konusma TEK siradan (sunucunun): patrol'un mesajlari da oraya aktariliyor
+        # (bkz. _patrol_status_cb) - iki ayri sayac arayuzde cift okumaya yol acar.
+        status.update(speak_text=self.speak_text, speak_seq=self.speak_seq, speak_expr=self.speak_expr)
+        # Ekran: gercek robotta varsayilan ACIK (gozler); patrol is yaparken de acar.
+        status['screen_on'] = self.screen_on or bool(status.get('screen_on'))
+        age = round(time.monotonic() - self._patrol_rx, 1) if alive else 0.1
+        return {'status': json.dumps(status), 'count': 1, 'age': age, 'patrol': alive}
 
     def _make_handler(node_self):
         class Handler(BaseHTTPRequestHandler):
@@ -708,60 +944,152 @@ class CafeUiServerNode(Node):
 
             def do_POST(self):
                 path = self.path.split('?')[0]
+                raw = self._read_body()
                 try:
-                    d = json.loads(self._read_body() or '{}')
+                    d = json.loads(raw or '{}')
                 except Exception:  # noqa: BLE001
+                    d = {}
+                if not isinstance(d, dict):
                     d = {}
 
                 def need_password():
                     return str(d.get('password', '')) != OPERATOR_PASSWORD
 
-                if path == '/api/teleop':
-                    node_self.publish_cmd(d.get('lx', 0.0), d.get('az', 0.0))
-                    self._send_json({'result': 'ok'})
-                elif path == '/api/teleop_stop':
+                def ok(**extra):
+                    self._send_json(dict(result='ok', **extra))
+
+                def error(reason):
+                    self._send_json({'result': 'error', 'reason': reason})
+
+                def to_patrol(cmd):
+                    """Devriye beynine komut; beyin calismiyorsa arayuze dürüst hata."""
+                    if not node_self.patrol_alive():
+                        error('devriye beyni (patrol.py) calismiyor')
+                        return
+                    node_self.publish_patrol(cmd)
+                    ok()
+
+                def joy():
+                    try:
+                        return float(d.get('lx', 0.0)), float(d.get('az', 0.0))
+                    except (TypeError, ValueError):
+                        return 0.0, 0.0
+
+                def clean(value):
+                    return str(value or '').replace('|', '/').replace('\n', ' ').strip()
+
+                if path in PATROL_SIMPLE_COMMANDS:
+                    reason = node_self.missing_target(path)
+                    if reason:
+                        error(reason)
+                        return
+                    to_patrol(PATROL_SIMPLE_COMMANDS[path])
+                elif path == '/api/stop_patrol':
+                    # DURDUR her zaman calismali: beyin olmasa da motora 0 hiz.
                     node_self.publish_cmd(0.0, 0.0)
-                    self._send_json({'result': 'ok'})
-                elif path == '/api/wake':
-                    node_self.screen_on = True
-                    self._send_json({'result': 'ok'})
-                elif path == '/api/sleep':
-                    node_self.screen_on = False
-                    self._send_json({'result': 'ok'})
+                    node_self.publish_patrol('stop')
+                    ok()
+                elif path == '/api/teleop':
+                    # Beyin varsa ONUN uzerinden (Nav2 gorevini keser, 10 cm sonar
+                    # korumasi + 0.6 sn bekci); yoksa dogrudan (haritalama yedegi -
+                    # stm32_bridge 0.5 sn komutsuz kalirsa zaten durdurur).
+                    lx, az = joy()
+                    if node_self.patrol_alive():
+                        node_self.publish_patrol(f'teleop:{lx:.3f}:{az:.3f}')
+                    else:
+                        node_self.publish_cmd(lx, az)
+                    ok()
+                elif path == '/api/teleop_stop':
+                    if node_self.patrol_alive():
+                        node_self.publish_patrol('teleop_stop')
+                    node_self.publish_cmd(0.0, 0.0)
+                    ok()
+                elif path == '/api/goto':
+                    # govde: {"table": 1..N, "action": "welcome_menu"}
+                    try:
+                        table = int(d['table'])
+                    except (KeyError, TypeError, ValueError):
+                        error('bad body')
+                        return
+                    reason = node_self.missing_target(path, table)
+                    if reason:
+                        error(reason)
+                        return
+                    to_patrol(f"goto:{table}:{d.get('action') or 'welcome_menu'}")
+                elif path == '/api/place_order':
+                    to_patrol(f'order:{raw or "{}"}')
+                elif path == '/api/send_message':
+                    frm, to, text = clean(d.get('from')), clean(d.get('to')), clean(d.get('text'))
+                    if not (frm and to and text):
+                        error('missing field')
+                        return
+                    to_patrol(f'msg:{frm}|{to}|{text}')
+                elif path == '/api/msg_reply':
+                    to_patrol(f"msg_reply:{clean(d.get('text'))}")
+                elif path == '/api/rescue_start':
+                    if need_password():
+                        error('wrong password')
+                        return
+                    to_patrol('rescue_start')
+                elif path == '/api/rescue_teleop':
+                    lx, az = joy()
+                    to_patrol(f'rescue_teleop:{lx:.3f}:{az:.3f}')
+                elif path == '/api/relocalize':
+                    try:
+                        node_self.relocalize_to_home()
+                    except RuntimeError as e:
+                        error(str(e))
+                        return
+                    ok()
+                elif path in ('/api/wake', '/api/sleep'):
+                    node_self.screen_on = path == '/api/wake'
+                    if node_self.patrol_alive():
+                        node_self.publish_patrol(path.rsplit('/', 1)[1])
+                    ok()
                 elif path == '/api/start_mapping':
                     if need_password():
-                        self._send_json({'result': 'error', 'reason': 'wrong password'})
+                        error('wrong password')
                         return
+                    node_self.publish_patrol('mapping_start')
                     node_self.mode = 'mapping'
-                    node_self.launch_mgr.start_slam()
-                    self._send_json({'result': 'ok'})
+                    node_self.launch_mgr.start_slam()   # Nav2'yi once kapatir
+                    ok()
                 elif path == '/api/finish_mapping':
                     if need_password():
-                        self._send_json({'result': 'error', 'reason': 'wrong password'})
+                        error('wrong password')
                         return
                     try:
-                        node_self.finish_mapping()
+                        pose_captured = node_self.finish_mapping()
                     except Exception as e:  # noqa: BLE001
-                        self._send_json({'result': 'error', 'reason': str(e)})
+                        error(str(e))
                         return
-                    self._send_json({'result': 'ok', 'pose_captured': False})
+                    ok(pose_captured=pose_captured)
                 elif path == '/api/cancel_mapping':
                     if need_password():
-                        self._send_json({'result': 'error', 'reason': 'wrong password'})
+                        error('wrong password')
                         return
-                    node_self.launch_mgr.stop()
+                    # Kaydedilmedi: eski harita diskte duruyor, onunla Nav2'ye don.
+                    if node_self.has_saved_map():
+                        node_self.start_nav_and_localize()
+                    else:
+                        node_self.launch_mgr.stop()
                     node_self.mode = 'operating'
-                    self._send_json({'result': 'ok'})
+                    node_self.publish_patrol('mapping_done')
+                    ok()
                 elif path == '/api/waypoints':
                     # govde: {"barista": {...}, "door": {...}, "tables": [{...}, ...]}
                     try:
                         node_self.save_waypoints_cfg(d)
                     except Exception as e:  # noqa: BLE001
-                        self._send_json({'result': 'error', 'reason': str(e)})
+                        error(str(e))
                         return
+                    node_self.publish_patrol('reload_waypoints')
+                    # Haritalamadan sonraki nokta isaretleme ("tagging") bu kayitla
+                    # biter, devriye tekrar kullanilabilir olur.
                     if node_self.mode in ('tagging', 'mapping'):
                         node_self.mode = 'operating'
-                    self._send_json({'result': 'ok', 'mode': node_self.mode})
+                        node_self.publish_patrol('mapping_done')
+                    ok(mode=node_self.mode)
                 elif path == '/api/volume':
                     # govde: {"volume": 0-100} - sifre gerekmez (zararsiz, geri alinabilir).
                     try:
@@ -793,15 +1121,15 @@ class CafeUiServerNode(Node):
                         self._send_json({'result': 'error', 'reason': str(e)})
                         return
                     self._send_json({'result': 'ok'})
-                elif path.startswith('/api/'):
-                    # patrol.py'ye ozel diger komutlar (start_patrol, goto,
-                    # rescue_* vb.) - dinleyen yok, zararsiz "ok" - motor/
-                    # patrol.py gelince GERCEK davranis kazanacaklar.
-                    if d:
-                        node_self.command_pub.publish(String(data=json.dumps({'path': path, 'body': d})))
-                    self._send_json({'result': 'ok'})
                 else:
-                    self.send_error(404)
+                    # Bilinmeyen uc: eskiden yalandan "ok" donuyordu (buton
+                    # calisiyor sanilirdi) - artik durustce hata.
+                    self.send_response(404)
+                    body = json.dumps({'result': 'error', 'reason': f'bilinmeyen komut: {path}'}).encode()
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
 
         return Handler
 

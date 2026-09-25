@@ -58,6 +58,11 @@ SONAR_MIN_RANGE = 0.02
 SONAR_FOV = 0.35         # rad - cryvex.urdf.xacro'daki sonar aciklik degeriyle ayni
 
 CMD_RESEND_PERIOD_S = 0.10   # STM32'nin 200ms watchdog'unu rahat besler
+# Bu suredir YENI /cmd_vel gelmediyse STM32'ye 0 hiz gonderilir. Olmasa son
+# komut SONSUZA KADAR tekrarlaniyordu: telefonla surerken WiFi koparsa robot
+# son hizla gitmeye devam ederdi (STM32 watchdog'u da tetiklenmez, cunku biz
+# beslemeye devam ediyoruz). Nav2/patrol hareket ederken 10-20 Hz yayinlar.
+CMD_TIMEOUT_S = 0.5
 
 WHEEL_BASE_M = 0.400   # app_config.h WHEEL_BASE_MM ile AYNI TUTULMALI (yer tutucu)
 BATT_LOW_MV = 22000    # app_config.h BATT_LOW_MV ile AYNI TUTULMALI
@@ -84,6 +89,7 @@ class Stm32Bridge(Node):
 
         self._lx_mm_s = 0
         self._az_mrad_s = 0
+        self._last_cmd_t = 0.0
         self._last_estop = False
         self._last_bumper = False
         self._last_batt_low = False
@@ -121,11 +127,14 @@ class Stm32Bridge(Node):
     def _cmd_vel_cb(self, msg: Twist):
         self._lx_mm_s = int(msg.linear.x * 1000.0)
         self._az_mrad_s = int(msg.angular.z * 1000.0)
+        self._last_cmd_t = time.monotonic()
         self._send_velocity()
 
     def _resend_cmd(self):
         # STM32'nin 200ms watchdog'u surekli beslensin - Nav2/patrol.py her
         # dongude YENI bir /cmd_vel yayinlamayabilir (ozellikle dururken).
+        if time.monotonic() - self._last_cmd_t > CMD_TIMEOUT_S:
+            self._lx_mm_s = self._az_mrad_s = 0  # komut kesildi -> dur (bkz. CMD_TIMEOUT_S)
         self._send_velocity()
 
     def _send_velocity(self):

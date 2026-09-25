@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'stm32_bridge = cryvex_bringup.stm32_bridge:main',
             'cafe_ui_server = cryvex_bringup.cafe_ui_server:main',
+            'patrol = cryvex_bringup.patrol:main',
         ],
     },
 )

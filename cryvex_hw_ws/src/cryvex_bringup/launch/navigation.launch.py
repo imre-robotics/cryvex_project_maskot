@@ -10,13 +10,24 @@ kopyasi - TEK FARKI: pointcloud_to_laserscan YOK (YDLIDAR native 2D /scan
 yayinliyor, sim'deki 3D->2D koprusune gerek yok). Kullanim:
 
     ros2 launch cryvex_bringup navigation.launch.py map:=/path/to/harita.yaml
+
+Normalde cafe_ui_server.py'nin LaunchManager'i baslatir (harita varsa acilista,
+"Ortami Haritala" bitince/vazgecilince), elle calistirmaya gerek yok.
+
+GECICI - fake_odom (varsayilan true): STM32/motor henuz bagli degil, EKF
+"odom" TF'ini yayinlamiyor; Nav2/AMCL bu cerceve olmadan hic calismaz.
+mapping.launch.py'deki gibi SABIT odom->base_footprint verilir (robot
+hareket etmiyor sayilir - sadece boru hattini acar). STM32 baglanip EKF
+gercek odom yayinlayinca fake_odom:=false (ikisi ayni TF'i yayinlarsa catisir).
 """
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -36,6 +47,19 @@ def generate_launch_description():
         default_value=os.path.join(bringup_pkg_dir, 'config', 'nav2_params.yaml'),
         description='Gercek robota uyarlanmis (sim testinden turetilmis) Nav2 parametreleri.')
 
+    fake_odom = LaunchConfiguration('fake_odom')
+    declare_fake_odom = DeclareLaunchArgument(
+        'fake_odom', default_value='true',
+        description='GECICI: STM32 yokken sabit odom->base_footprint (bkz. docstring).')
+    static_odom_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='cryvex_temp_odom_tf',
+        output='screen',
+        arguments=['--frame-id', 'odom', '--child-frame-id', 'base_footprint'],
+        condition=IfCondition(fake_odom),
+    )
+
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav2_bringup_dir, 'launch', 'bringup_launch.py')),
@@ -43,6 +67,11 @@ def generate_launch_description():
             'map': map_yaml_file,
             'use_sim_time': use_sim_time,
             'params_file': params_file,
+            # Jazzy varsayilani tum Nav2'yi TEK konteyner surece yukler; Pi'de
+            # "load_node ... failed to send response (timeout)" ile bazi
+            # dugumler (lifecycle_manager_localization dahil) HIC yuklenmedi
+            # ve Nav2 yarim kaldi (2026-09-25). Ayri surecler daha saglam.
+            'use_composition': 'False',
         }.items(),
     )
 
@@ -50,5 +79,7 @@ def generate_launch_description():
         declare_use_sim_time,
         declare_map,
         declare_params,
+        declare_fake_odom,
+        static_odom_tf,
         nav2_launch,
     ])

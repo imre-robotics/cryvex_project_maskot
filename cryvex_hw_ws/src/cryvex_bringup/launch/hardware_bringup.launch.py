@@ -88,6 +88,21 @@ def generate_launch_description():
         parameters=[{'http_port': 8080, 'use_sim_time': False}],
     )
 
+    # Devriye beyni (sim'den tasindi). Nav2'yi kendisi baslatmaz - cafe_ui_server
+    # kayitli haritayla baslatir; beyin Nav2 gelene kadar bekler, komutlari
+    # /patrol_command'dan alir. Cokerse arayuz "idle" yedegine duser; kendini
+    # yeniden baslatsin.
+    # name= VERILMEZ: surecte 3 dugum var (patrol_command_listener, sonar_reader,
+    # basic_navigator); name= hepsini ayni ada cevirip cakistiriyordu.
+    patrol = Node(
+        package='cryvex_bringup',
+        executable='patrol',
+        output='screen',
+        parameters=[{'use_sim_time': False}],
+        respawn=True,
+        respawn_delay=3.0,
+    )
+
     return LaunchDescription([
         declare_serial_port,
         robot_state_publisher,
@@ -95,4 +110,5 @@ def generate_launch_description():
         ydlidar_node,
         ekf_node,
         cafe_ui_server,
+        patrol,
     ])
