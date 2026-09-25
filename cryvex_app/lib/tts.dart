@@ -1,12 +1,12 @@
 import 'api/robot_api.dart';
 
-/// Robotun GERÇEK sesini kendi hoparlöründe (Pi'ye bağlı JBL vb.) çaldırır -
-/// telefonda DEĞİL, komut telefondan verilse bile ses robottan çıkar.
-/// Sunucu üretemezse (ör. offline) SESSİZCE geçer, hiçbir buton hata göstermez.
-Future<void> speak(RobotApi api, String text) async {
+/// Robotu konuşturur: ses telefonda DEĞİL robotun hoparlöründen çıkar, robotun
+/// ekranında ağız oynar ve [expr] (happy/love/alert/sad) verilirse ifadesi değişir.
+/// Sunucuya ulaşılamazsa SESSİZCE geçer, hiçbir buton hata göstermez.
+Future<void> speak(RobotApi api, String text, {String expr = ''}) async {
   if (text.isEmpty) return;
   try {
-    await api.speakHere(text);
+    await api.speakHere(text, expr: expr);
   } catch (_) {
     // sessiz geç
   }

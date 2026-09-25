@@ -13,10 +13,10 @@ pointcloud'dan cevirmeye gerek yok).
 ONEMLI: async_slam_toolbox_node bir LIFECYCLE node - baslar baslamaz hicbir
 sey yapmaz (subscribe/publish etmez), disaridan "configure" + "activate"
 gecisleri cagrilana kadar rclcpp::spin() icinde bos bos bekler (sim'deki
-mapping.launch.py'da da bu eksik, orada da fark edilmemis). Asagida node
-baslar baslamaz bu iki gecisi otomatik tetikliyoruz (ros2 lifecycle set CLI'i
-ile) - elle "ros2 lifecycle set /slam_toolbox configure/activate" cagirmaya
-GEREK YOK.
+mapping.launch.py'da da bu eksik, orada da fark edilmemis). Asagida bu iki
+gecis launch olaylariyla tetikleniyor: launch_ros node'un servisi hazir olana
+kadar KENDISI bekler (sabit gecikme yok - acilista DDS kesfi yavas olsa da
+calisir), configure bitince (inactive) activate gelir.
 
 GECICI: STM32/motor henuz baglanmadigi icin ekf_filter_node hicbir girdi
 (wheel/odom, imu/data_raw) alamiyor ve "odom" TF cercevesini HIC yayinlamiyor
@@ -41,10 +41,13 @@ islem yapar).
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
-from launch.event_handlers import OnProcessExit, OnProcessStart
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
+from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
+from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
@@ -58,10 +61,11 @@ def generate_launch_description():
         'slam_params_file',
         default_value=os.path.join(slam_pkg_dir, 'config', 'mapper_params_online_async.yaml'))
 
-    slam_toolbox_node = Node(
+    slam_toolbox_node = LifecycleNode(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
+        namespace='',
         output='screen',
         parameters=[slam_params_file, {
             'use_sim_time': use_sim_time,
@@ -82,28 +86,20 @@ def generate_launch_description():
                    '--frame-id', 'odom', '--child-frame-id', 'base_footprint'],
     )
 
-    configure_slam = ExecuteProcess(
-        cmd=['ros2', 'lifecycle', 'set', '/slam_toolbox', 'configure'],
-        output='screen',
-    )
-    activate_slam = ExecuteProcess(
-        cmd=['ros2', 'lifecycle', 'set', '/slam_toolbox', 'activate'],
-        output='screen',
-    )
-    # slam_toolbox process baslar baslamaz DDS/servis kesfi icin birkac
-    # saniye gerekiyor - hemen "configure" cagirmak "service not available"
-    # ile basarisiz olur, bu yuzden kisa bir gecikme koyuyoruz.
-    trigger_configure = RegisterEventHandler(
-        OnProcessStart(target_action=slam_toolbox_node,
-                        on_start=[TimerAction(period=3.0, actions=[configure_slam])]))
-    trigger_activate = RegisterEventHandler(
-        OnProcessExit(target_action=configure_slam, on_exit=[activate_slam]))
+    configure_slam = EmitEvent(event=ChangeState(
+        lifecycle_node_matcher=matches_action(slam_toolbox_node),
+        transition_id=Transition.TRANSITION_CONFIGURE))
+    activate_when_configured = RegisterEventHandler(OnStateTransition(
+        target_lifecycle_node=slam_toolbox_node, goal_state='inactive',
+        entities=[EmitEvent(event=ChangeState(
+            lifecycle_node_matcher=matches_action(slam_toolbox_node),
+            transition_id=Transition.TRANSITION_ACTIVATE))]))
 
     return LaunchDescription([
         declare_use_sim_time,
         declare_slam_params,
         static_odom_tf,
         slam_toolbox_node,
-        trigger_configure,
-        trigger_activate,
+        configure_slam,
+        activate_when_configured,
     ])

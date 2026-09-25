@@ -27,6 +27,15 @@ class _SetupWebviewScreenState extends State<SetupWebviewScreen> {
       ..setBackgroundColor(CryvexColors.bg)
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (_) => setState(() => _loading = false),
+        // Kurulumdaki "Devriye Ekranı" bağlantısı robotun YÜZ arayüzüne (/)
+        // gider; telefonda onu açmak yerine uygulamanın ana ekranına dön.
+        onNavigationRequest: (req) {
+          if (Uri.parse(req.url).path == '/') {
+            if (mounted) Navigator.of(context).pop();
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
       ))
       ..loadRequest(Uri.parse('$baseUrl/setup'));
   }

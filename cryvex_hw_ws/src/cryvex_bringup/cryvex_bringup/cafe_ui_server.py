@@ -16,9 +16,12 @@ olarak SIMDILIK STUB birakildi:
     YAPMAZ (motor yok).
   - /api/teleop, /start_mapping, /finish_mapping, /cancel_mapping,
     /live_map.png: GERCEK calisir (LiDAR+slam_toolbox+/cmd_vel gercek).
-  - /setup (masa/kapi/barmen noktalarini isaretleme) + /api/waypoints +
-    /api/tts_audio (Piper TTS, tamamen offline): GERCEK calisir
-    (tablet_server.py'den birebir portlandi, 2026-09-24).
+  - /setup (masa/kapi/barmen noktalarini isaretleme) + /api/waypoints: GERCEK
+    calisir (tablet_server.py'den birebir portlandi, 2026-09-24).
+  - /api/tts_audio + /api/speak_here: robotun TEK sesi (edge-tts, kadin).
+    Uretilen her cumle KALICI onbellege yazilir ve arayuzun sabit cumleleri
+    internet gelir gelmez onceden uretilir - acilista internet/saat henuz
+    hazir degilken de robot hep ayni sesle konusur.
 
 Motor/STM32 baglaninca ve patrol.py gercek donanima portlaninca bu dosyanin
 stub kisimlari GERCEK patrol_status/is_configured mantigiyla degisecek -
@@ -27,7 +30,6 @@ index.html'de TEK SATIR degisiklik gerekmeyecek (zaten aynen kullaniliyor).
 import ast
 import asyncio
 import hashlib
-import io
 import json
 import os
 import re
@@ -36,8 +38,8 @@ import struct
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.parse
-import wave
 import zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -50,18 +52,10 @@ from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String
 
 try:
-    import edge_tts  # gercek Turkce sinir agi sesi (Microsoft, internet gerekir)
-    # kurulu degilse /api/tts_audio Piper'a (offline) geriye duser.
+    import edge_tts  # kurulu degilse yalnizca onbellekteki cumleler calinir
     _EDGE_TTS_AVAILABLE = True
 except ImportError:
     _EDGE_TTS_AVAILABLE = False
-
-try:
-    from piper import PiperVoice  # tamamen OFFLINE Turkce ses - kafenin interneti
-    # olmayabilir/giderse robot YINE de konussun diye asil katman bu.
-    _PIPER_AVAILABLE = True
-except ImportError:
-    _PIPER_AVAILABLE = False
 
 OPERATOR_PASSWORD = '1234'  # index.html/Flutter app ile AYNI (sim ile tutarli)
 
@@ -72,10 +66,10 @@ MAP_QOS = QoSProfile(
 JOY_MAX_LIN = 0.30
 JOY_MAX_ANG = 1.00
 
-TTS_VOICE = 'tr-TR-EmelNeural'   # edge-tts (varsa) - kadin, gercek sinir agi sesi
-TTS_CACHE_DIR = '/tmp/cryvex_tts_cache'
-PIPER_VOICE_NAME = 'tr_TR-dfki-medium'  # tek Turkce Piper sesi (piper-voices deposunda)
-_piper_voice_singleton = None
+ROBOT_EXPRESSIONS = ('happy', 'love', 'alert', 'sad')  # index.html setExpression() ile ayni
+
+TTS_VOICE = 'tr-TR-EmelNeural'
+TTS_CACHE_DIR = os.path.expanduser('~/.cache/cryvex_tts')  # /tmp degil: acilista silinmesin
 
 
 # ==================== PNG kodlama (tablet_server.py'den birebir) ====================
@@ -150,99 +144,44 @@ def _pgm_to_png_bytes(path):
     return _gray_bytes_to_png(width, height, pixels)
 
 
-# ==================== Ses (TTS) - tablet_server.py'den birebir ====================
-# 1) edge-tts (bulut, en kaliteli, internet gerekir - kafede muhtemelen YOK)
-# 2) Piper (yerel/tamamen offline - asil katman budur)
-# 3) (bu fonksiyonun DISINDA) tarayicinin kendi sesi - HTTP 503 donunce
-#    index.html speakBrowser()'a otomatik geriye duser.
-def _piper_model_path():
-    real_script = os.path.realpath(os.path.abspath(__file__))
-    src_root = os.path.dirname(os.path.dirname(real_script))
-    src_path = os.path.join(src_root, 'piper_voices', PIPER_VOICE_NAME + '.onnx')
-    if os.path.isfile(src_path):
-        return src_path
-    share_dir = get_package_share_directory('cryvex_bringup')
-    return os.path.join(share_dir, 'piper_voices', PIPER_VOICE_NAME + '.onnx')
-
-
-def _get_piper_voice():
-    global _piper_voice_singleton
-    if _piper_voice_singleton is None:
-        model_path = _piper_model_path()
-        if not os.path.isfile(model_path):
-            return None
-        _piper_voice_singleton = PiperVoice.load(model_path)
-    return _piper_voice_singleton
-
-
-def _tts_audio_edge(text):
-    if not _EDGE_TTS_AVAILABLE:
-        return None
+# ==================== Ses (TTS) ====================
+# Robotun TEK sesi edge-tts (kadin). Baska bir sese (Piper/tarayici) dusmez:
+# internet yokken ve cumle daha once hic uretilmediyse sessiz gecer.
+def _tts_path(text):
+    """text -> robotun sesiyle uretilmis mp3'un onbellek yolu ya da None."""
     key = hashlib.sha1(f'edge:{TTS_VOICE}:{text}'.encode('utf-8')).hexdigest()
     path = os.path.join(TTS_CACHE_DIR, key + '.mp3')
     if os.path.isfile(path) and os.path.getsize(path) > 0:
-        try:
-            with open(path, 'rb') as f:
-                return f.read()
-        except Exception:  # noqa: BLE001
-            pass
-
-    async def _synth():
-        communicate = edge_tts.Communicate(text, TTS_VOICE)
-        await communicate.save(path)
-
-    try:
-        os.makedirs(TTS_CACHE_DIR, exist_ok=True)
-        asyncio.run(asyncio.wait_for(_synth(), timeout=8.0))
-        with open(path, 'rb') as f:
-            return f.read()
-    except Exception:  # noqa: BLE001
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:  # noqa: BLE001
-            pass
+        return path
+    if not _EDGE_TTS_AVAILABLE:
         return None
-
-
-def _tts_audio_piper(text):
-    if not _PIPER_AVAILABLE:
-        return None
-    key = hashlib.sha1(f'piper:{PIPER_VOICE_NAME}:{text}'.encode('utf-8')).hexdigest()
-    path = os.path.join(TTS_CACHE_DIR, key + '.wav')
-    if os.path.isfile(path) and os.path.getsize(path) > 0:
-        try:
-            with open(path, 'rb') as f:
-                return f.read()
-        except Exception:  # noqa: BLE001
-            pass
-
+    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=TTS_CACHE_DIR, suffix='.part')
+    os.close(fd)
     try:
-        voice = _get_piper_voice()
-        if voice is None:
+        asyncio.run(asyncio.wait_for(edge_tts.Communicate(text, TTS_VOICE).save(tmp), timeout=8.0))
+        if os.path.getsize(tmp) == 0:
             return None
-        buf = io.BytesIO()
-        with wave.open(buf, 'wb') as wf:
-            voice.synthesize_wav(text, wf)
-        data = buf.getvalue()
-        os.makedirs(TTS_CACHE_DIR, exist_ok=True)
-        with open(path, 'wb') as f:
-            f.write(data)
-        return data
+        os.replace(tmp, path)  # atomik: yarim yazilmis dosya onbellekte asla gorunmez
+        return path
     except Exception:  # noqa: BLE001
         return None
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
-def _tts_audio_bytes(text):
-    if not text:
-        return None, None
-    audio = _tts_audio_edge(text)
-    if audio is not None:
-        return audio, 'audio/mpeg'
-    audio = _tts_audio_piper(text)
-    if audio is not None:
-        return audio, 'audio/wav'
-    return None, None
+def _ui_phrases(web_dir):
+    """index.html'deki sabit cumleler: speak/robotSays('...') + *_PHRASES/*_LINES dizileri."""
+    try:
+        with open(os.path.join(web_dir, 'index.html'), encoding='utf-8') as f:
+            html = f.read()
+    except OSError:
+        return []
+    phrases = set(re.findall(r"(?:speak|robotSays)\('([^'\\]+)'\)", html))
+    for body in re.findall(r'const [A-Z_]+(?:PHRASES|LINES) = \[(.*?)\];', html, re.DOTALL):
+        phrases.update(re.findall(r"'([^'\\]+)'", body))
+    return sorted(phrases)
 
 
 # ==================== Hoparlor sesi (PulseAudio) ====================
@@ -279,26 +218,6 @@ def set_volume_pct(pct):
     except Exception:  # noqa: BLE001
         return False
 
-
-def speak_on_robot(text):
-    """Telefon/uzak istemciler icin: sesi ISTEMCIYE DEGIL, robotun kendi
-    hoparlorune (JBL vb., Pi'nin PulseAudio'su) calar - index.html/dokunmatik
-    ekranin AKSINE (o zaten kendi Audio elementiyle tarayicida - yani Pi'de -
-    calar). mpg123 (edge-tts -> mp3) / paplay (Piper -> wav) arka planda,
-    HTTP cevabini bekletmeden baslatilir."""
-    audio, content_type = _tts_audio_bytes(text)
-    if audio is None:
-        return False
-    suffix = '.mp3' if content_type == 'audio/mpeg' else '.wav'
-    fd, path = tempfile.mkstemp(suffix=suffix, prefix='cryvex_speak_')
-    with os.fdopen(fd, 'wb') as f:
-        f.write(audio)
-    player = ['mpg123', '-q', path] if suffix == '.mp3' else ['paplay', path]
-    subprocess.Popen(
-        player, env=_pactl_env(),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    threading.Timer(30.0, lambda: os.path.exists(path) and os.remove(path)).start()
-    return True
 
 
 class LaunchManager:
@@ -367,6 +286,7 @@ class CafeUiServerNode(Node):
         self._map_png_cache = None
         self.mode = 'operating'
         self.screen_on = True
+        self.speak_text, self.speak_expr, self.speak_seq = '', '', 0
 
         self.create_subscription(OccupancyGrid, '/map', self._map_cb, MAP_QOS)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -376,10 +296,24 @@ class CafeUiServerNode(Node):
         self._httpd = ThreadingHTTPServer(('0.0.0.0', port), self._make_handler())
         self._http_thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._http_thread.start()
+        threading.Thread(target=self._prewarm_tts, daemon=True).start()
         self.get_logger().info(f'Kafe arayuzu (bench) hazir: http://0.0.0.0:{port}/')
         self.get_logger().warn(
             'BU BIR ARA SURUM: patrol.py/motor henuz yok - devriye/siparis/mesaj '
             'butonlari hicbir sey yapmaz (hata da vermez), sadece haritalama+joystick GERCEK calisir.')
+
+    def _prewarm_tts(self):
+        # Arayuzun sabit cumleleri internet gelir gelmez kalici onbellege
+        # uretilir; acilista (internet/saat henuz hazir degilken) da hazir olsunlar.
+        pending = _ui_phrases(self.web_dir)
+        delay = 10.0
+        while pending:
+            pending = [p for p in pending if _tts_path(p) is None]
+            if pending:
+                self.get_logger().warn(f'{len(pending)} cumlenin sesi uretilemedi (internet?), {delay:.0f}sn sonra tekrar.')
+                time.sleep(delay)
+                delay = min(delay * 2, 300.0)
+        self.get_logger().info('Ses onbellegi hazir (tum arayuz cumleleri).')
 
     def _map_cb(self, msg):
         with self._lock:
@@ -479,6 +413,12 @@ class CafeUiServerNode(Node):
         msg.angular.z = az
         self.cmd_pub.publish(msg)
 
+    def request_robot_speech(self, text, expr):
+        _tts_path(text)  # ses simdiden hazir olsun: kiosk istediginde aninda calsin
+        with self._lock:
+            self.speak_text, self.speak_expr = text, expr
+            self.speak_seq += 1
+
     def status_payload(self):
         # patrol.py'nin publish_status_now() ile AYNI anahtarlar - index.html/
         # Flutter app bunlari bekliyor. Motor/patrol yok, hepsi "bos/idle" -
@@ -487,7 +427,8 @@ class CafeUiServerNode(Node):
             'state': 'idle', 'waypoint': None, 'table_index': -1,
             'wait_total': 0.0, 'wait_remaining': 0.0,
             'interacting': False, 'greeting': False, 'cute': False,
-            'screen_on': self.screen_on, 'speak_text': '', 'speak_seq': 0,
+            'screen_on': self.screen_on, 'speak_text': self.speak_text,
+            'speak_seq': self.speak_seq, 'speak_expr': self.speak_expr,
             'order': None,
             'msg_phase': None, 'msg_from': None, 'msg_to': None, 'msg_text': None,
             'msg_total': 0.0, 'msg_remaining': 0.0, 'msg_composing': False,
@@ -563,21 +504,22 @@ class CafeUiServerNode(Node):
                     self.send_error(404)
 
             def _serve_tts_audio(self):
-                # ?text=<url-encoded cumle> - Piper (offline) ile gercek Turkce ses.
-                # Basarisiz olursa 503 - index.html bunu SESSIZCE yakalayip kendi
-                # tarayici sesine (speechSynthesis) doner.
                 qs = urllib.parse.urlparse(self.path).query
                 text = urllib.parse.parse_qs(qs).get('text', [''])[0].strip()
                 if not text:
                     self.send_error(400, 'text parametresi gerekli')
                     return
-                audio, content_type = _tts_audio_bytes(text)
-                if audio is None:
-                    self.send_error(503, 'TTS uretilemedi (edge-tts VE Piper ikisi de basarisiz)')
+                path = _tts_path(text)
+                if path is None:
+                    self.send_error(503, 'Ses uretilemedi (internet yok ve onbellekte yok)')
                     return
+                with open(path, 'rb') as f:
+                    audio = f.read()
                 self.send_response(200)
-                self.send_header('Content-Type', content_type)
-                self.send_header('Cache-Control', 'public, max-age=86400')
+                self.send_header('Content-Type', 'audio/mpeg')
+                # Tarayici SAKLAMASIN: ses degisirse eski ses kendi disk
+                # onbelleginden calinmaya devam ediyordu. Sunucu onbellegi zaten hizli.
+                self.send_header('Cache-Control', 'no-store')
                 self.send_header('Content-Length', str(len(audio)))
                 self.end_headers()
                 self.wfile.write(audio)
@@ -656,14 +598,16 @@ class CafeUiServerNode(Node):
                     ok = set_volume_pct(pct)
                     self._send_json({'result': 'ok' if ok else 'error', 'volume': pct})
                 elif path == '/api/speak_here':
-                    # govde: {"text": "..."} - telefon/uzak istemciler icin: sesi
-                    # ISTEMCIDE DEGIL robotun kendi hoparlorunde (Pi) calar.
+                    # govde: {"text": "...", "expr": "happy|love|alert|sad" (istege bagli)}
+                    # Telefon vb. uzak istemciler icin: robotun KENDI ekrani bir
+                    # sonraki durum sorgusunda konusur, agzi oynar, ifadesi degisir.
                     text = str(d.get('text', '')).strip()
                     if not text:
                         self._send_json({'result': 'error', 'reason': 'text gerekli'})
                         return
-                    ok = speak_on_robot(text)
-                    self._send_json({'result': 'ok' if ok else 'error'})
+                    expr = d.get('expr', '')
+                    node_self.request_robot_speech(text, expr if expr in ROBOT_EXPRESSIONS else '')
+                    self._send_json({'result': 'ok'})
                 elif path.startswith('/api/'):
                     # patrol.py'ye ozel diger komutlar (start_patrol, goto,
                     # rescue_* vb.) - dinleyen yok, zararsiz "ok" - motor/

@@ -64,7 +64,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!ok) return;
     await _api.stopPatrol();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Devriye durduruldu')));
-    speak(_api, 'Devriyeyi durdurdum.');
+    speak(_api, 'Devriyeyi durdurdum.', expr: 'happy');
   }
 
   void _openJoystick(JoyMode mode) async {
@@ -100,11 +100,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 18),
                 _sectionLabel('Devriye'),
                 _actionButton('🚀 Devriyeyi Başlat', CryvexButtonStyle.green,
-                    () => _requireMapReady(() { _api.startPatrol(); speak(_api, 'Devriyeye başlıyorum.'); })),
+                    () => _requireMapReady(() { _api.startPatrol(); speak(_api, 'Devriyeye başlıyorum.', expr: 'alert'); })),
                 _actionButton('🚪 Karşılama (Kapıda, 3 dk)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() { _api.greetDoor(); speak(_api, 'Kapıda karşılamaya gidiyorum.'); })),
+                    () => _requireMapReady(() { _api.greetDoor(); speak(_api, 'Kapıda karşılamaya gidiyorum.', expr: 'love'); })),
                 _actionButton('🎈 Sosyalleşme (Gezinme)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() { _api.wander(); speak(_api, 'Kafede geziniyorum.'); })),
+                    () => _requireMapReady(() { _api.wander(); speak(_api, 'Kafede geziniyorum.', expr: 'happy'); })),
                 _actionButton('🏠 Üsse Dön', CryvexButtonStyle.cyan,
                     () => _requireMapReady(() { _api.goHome(); speak(_api, 'Üsse dönüyorum.'); })),
                 _actionButton('🔒 Devriyeyi Durdur', CryvexButtonStyle.red, _stopPatrol),

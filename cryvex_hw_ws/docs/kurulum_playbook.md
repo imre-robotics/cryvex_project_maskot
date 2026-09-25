@@ -89,10 +89,16 @@ mevcut haliyle sadece Gazebo simülasyonundaki `tablet_server.py` kullanıyor.)
 ## 3) udev kuralları (USB port isimlerini sabitleme)
 
 ```bash
+sudo apt-get install -y iw
 sudo cp ~/cryvex_hw_ws/udev_rules/99-cryvex-serial.rules /etc/udev/rules.d/
+sudo cp ~/cryvex_hw_ws/udev_rules/70-cryvex-wifi-powersave.rules /etc/udev/rules.d/
 sudo udevadm control --reload
 sudo udevadm trigger
 ```
+`70-cryvex-wifi-powersave.rules` WiFi güç tasarrufunu kapatır: açıkken Pi'nin
+WiFi yongası bağlantıyı kendi koparıp (`wpa_supplicant`: `locally_generated=1`,
+ardından `ASSOC-REJECT`) dakikalarca geri bağlanamıyordu (2026-09-25, sahada).
+Doğrulama: `iw dev wlan0 get power_save` → `off`.
 
 STM32 kuralı (`0483:374b`) hazır ve doğrulanmış. **YDLIDAR kuralı doğrulanmadı**
 - cihazı takınca önce kontrol et:
@@ -263,7 +269,7 @@ açar (sahada tam olarak bu yaşandı ve teşhis edildi).
 Kurulum adımları:
 ```bash
 # 1) Minimal X11 + Chromium (Ubuntu 24.04'te chromium bir snap sarmalayicidir)
-sudo apt-get install -y xinit xserver-xorg openbox unclutter chromium-browser
+sudo apt-get install -y xinit xserver-xorg x11-xserver-utils openbox unclutter chromium-browser
 
 # 2) Pi5'in dogru DRM cihazini once dogrulayin (baska bir Pi'de card
 #    numarasi farkli olabilir - "connected" yazan satiri bulun):

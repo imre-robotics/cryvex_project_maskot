@@ -145,6 +145,19 @@
             100% { transform: translate(20px, -15px) scale(1.1); }
         }
 
+        /* ---------- KENAR IŞIKLARI: ekranı turlayan, arkalarında sönen iz bırakan 4 mavi ışık ---------- */
+        /* Katmanlar ve hareket JS'te üretilir (bkz. buildFrameLights). Burada sadece görünüm. */
+        .frame-light { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .frame-light rect {
+            x: 5px; y: 5px; width: calc(100% - 10px); height: calc(100% - 10px); rx: 16px;
+            fill: none; stroke: #1fa2ff; stroke-linecap: round;
+        }
+        .frame-light .t3   { stroke-width: 2;   opacity: 0.1; }
+        .frame-light .t2   { stroke-width: 2.5; opacity: 0.25; }
+        .frame-light .t1   { stroke-width: 3;   opacity: 0.5; }
+        .frame-light .glow { stroke-width: 12;  opacity: 0.25; }
+        .frame-light .head { stroke-width: 4;   stroke: #bfe6ff; }
+
         /* ---------- EYES ---------- */
         .eyes-wrapper {
             display: flex; align-items: center; justify-content: space-between;
@@ -756,6 +769,7 @@
     <div id="screen-main" class="screen">
         <div class="ambient-orb o1"></div>
         <div class="ambient-orb o2"></div>
+        <svg class="frame-light" id="frame-light" aria-hidden="true"></svg>
 
         <div class="eyes-wrapper" id="eyes-wrapper">
             <div class="eye closed" id="eye-left">
@@ -1005,7 +1019,7 @@
         let lastGreetWaypoint = '';
         let greetSpeakAt = 0;
         let wasCute = false;
-        let lastSpeakSeq = 0;
+        let lastSpeakSeq = null;
         let lastRemoteSpeakAt = 0;
         let lastScreenOn = false;
         let powering = false;
@@ -1106,9 +1120,20 @@
         // uretemezse SESSIZCE eski yonteme (tarayicinin kendi speechSynthesis
         // sesi) doner - hicbir davranis kaybolmuyor, sadece daha iyisi eklendi.
         let ttsAudioEl = null;
+        // Ses ve yüz tepkisi hep ROBOTUN ekranında olur. Başka cihazda (telefon) açılan
+        // arayüzde butonla gelen konuşma robota iletilir; durumdan kendiliğinden doğan
+        // konuşma (robotSays) orada sessiz kalır, yoksa açık her cihaz robotu tekrar konuşturur.
+        const ON_ROBOT = ['localhost', '127.0.0.1'].includes(location.hostname);
         function speak(text) {
             if (!text) return;
+            if (!ON_ROBOT) {
+                apiCall('/api/speak_here', JSON.stringify({ text, expr: currentExprType }));
+                return;
+            }
             playServerTts(text).catch(() => speakBrowser(text));
+        }
+        function robotSays(text) {
+            if (ON_ROBOT) speak(text);
         }
         function playServerTts(text) {
             return new Promise((resolve, reject) => {
@@ -1180,7 +1205,7 @@
                         eyeLeft.classList.remove('closed');
                         eyeRight.classList.remove('closed');
                         if (!booted) { startBlinking(); startIdleMovement(); booted = true; }
-                        speak('Sistem başlatıldı.');
+                        robotSays('Sistem başlatıldı.');
                         powering = false;
                     }, 300);
                 }, 500);
@@ -1292,6 +1317,39 @@
             clearInterval(talkTimer); talkTimer = null;
             setMouthShape(currentExprType);
         }
+
+        // ==================== KENAR IŞIKLARI ====================
+        // 4 ışık ekranı turlar. Her kenarı AYNI sürede geçtikleri için (uzun kenarda daha hızlı)
+        // biri bir köşedeyken diğer üçü de öbür köşelerdedir; çeyrek tur arayla başlarlar.
+        const frameSvg = $('frame-light');
+        const FRAME_LAP_MS = 8000, FRAME_INSET = 5, FRAME_RADIUS = 16;
+        const FRAME_LAYERS = [['t3', 140], ['t2', 95], ['t1', 55], ['glow', 20], ['head', 20]];  // [sınıf, iz boyu /1000 tur]
+        function buildFrameLights() {
+            frameSvg.replaceChildren();
+            const box = frameSvg.getBoundingClientRect();
+            const w = box.width - 2 * FRAME_INSET, h = box.height - 2 * FRAME_INSET;
+            if (w <= 0 || h <= 0) return;
+            const r = Math.min(FRAME_RADIUS, w / 2, h / 2), arc = Math.PI * r / 2;
+            const top = w - 2 * r, side = h - 2 * r;
+            const perimeter = 2 * top + 2 * side + 4 * arc;
+            // rect yolu sol-üst yayın bitişinden başlar, saat yönünde gider; köşe = yayın ortası
+            const corners = [-arc / 2, top + arc / 2, top + side + 1.5 * arc,
+                             2 * top + side + 2.5 * arc, perimeter - arc / 2].map(px => px * 1000 / perimeter);
+            for (let light = 0; light < 4; light++) {
+                for (const [cls, len] of FRAME_LAYERS) {
+                    const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    el.setAttribute('class', cls);
+                    el.setAttribute('pathLength', '1000');
+                    el.style.strokeDasharray = `${len} ${1000 - len}`;  // desen = tam tur: köşeden kesintisiz geçer
+                    frameSvg.appendChild(el);
+                    // offset = len - uç konumu: tüm katmanların ucu aynı noktada, izler arkada
+                    el.animate(corners.map((c, k) => ({ strokeDashoffset: `${len - c}`, offset: k / 4 })),
+                               { duration: FRAME_LAP_MS, iterations: Infinity, delay: -light * FRAME_LAP_MS / 4 });
+                }
+            }
+        }
+        buildFrameLights();
+        window.addEventListener('resize', buildFrameLights);
 
         // ==================== OVERLAYS ====================
         function openOverlay(el) {
@@ -2063,30 +2121,32 @@
                 if (currentScreen !== 'main') return;   // ekran kapalıyken gerisi çalışmasın
 
                 // ----- Robotun okuyacağı hazır mesaj (garson kalıpları) -----
-                if (info.speak_seq && info.speak_seq !== lastSpeakSeq) {
+                if (lastSpeakSeq === null) lastSpeakSeq = info.speak_seq;   // sayfa yeni açıldı: eski mesajı tekrar okuma
+                else if (info.speak_seq && info.speak_seq !== lastSpeakSeq) {
                     lastSpeakSeq = info.speak_seq;
                     lastRemoteSpeakAt = Date.now();
-                    if (info.speak_text) speak(info.speak_text);
+                    if (ON_ROBOT && info.speak_expr) setExpression(info.speak_expr, 2000);
+                    if (info.speak_text) robotSays(info.speak_text);
                 }
 
                 if (info.state !== currentStatus) {
                     if (info.state === 'waiting_at_table') {
                         // gözler kaybolur (updateRing), "menü için dokunun" ekranı gelir
                         if (Date.now() - lastRemoteSpeakAt > 5000)
-                            speak('Masanıza geldim. Menüyü görmek için ekrana dokunun.');
+                            robotSays('Masanıza geldim. Menüyü görmek için ekrana dokunun.');
                         if (navigator.vibrate) navigator.vibrate(60);
                     }
                     if (currentStatus === 'waiting_at_table' && info.state === 'patrol') {
                         if (overlayOpen === overlayOrder) { closeOverlay(); }
                         showToast('Süre doldu · sonraki masaya geçiliyor');
                         setExpression('sad', 2200);
-                        speak('Başka sefere görüşmek üzere.');
+                        robotSays('Başka sefere görüşmek üzere.');
                     }
                     if (info.state === 'at_barista') {
                         renderReceipt(info.order);
                         openOverlay(overlayBarista);
                         setExpression('alert');
-                        speak('Barmen, yeni siparişiniz hazır. Onaylayınca devam edeceğim.');
+                        robotSays('Barmen, yeni siparişiniz hazır. Onaylayınca devam edeceğim.');
                     } else if (currentStatus === 'at_barista' && overlayOpen === overlayBarista) {
                         closeOverlay();
                         setExpression('');
@@ -2106,7 +2166,7 @@
                     // patrol zaten hazır bir mesaj okuduysa (garson kalıbı) üstüne bindirme
                     if (now - greetSpeakAt > 18000 && now - lastRemoteSpeakAt > 5000) {
                         greetSpeakAt = now;
-                        speak(info.waypoint === 'Kapi'
+                        robotSays(info.waypoint === 'Kapi'
                             ? 'Hoş geldiniz! Cryvex kafeye buyurun, size nasıl yardımcı olabilirim?'
                             : rnd(GREET_LINES));
                     }

@@ -1,0 +1,3 @@
+# Raspberry Pi WiFi (brcmfmac) guc tasarrufu acikken surucu baglantiyi kendi
+# koparip (locally_generated=1) dakikalarca geri baglanamiyor - kapat.
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="wlan*", RUN+="/usr/sbin/iw dev %k set power_save off"

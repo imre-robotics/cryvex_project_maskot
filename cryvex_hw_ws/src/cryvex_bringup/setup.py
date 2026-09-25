@@ -15,7 +15,6 @@ setup(
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
         (os.path.join('share', package_name, 'urdf'), glob('urdf/*.xacro')),
         (os.path.join('share', package_name, 'web'), glob('web/*.html')),
-        (os.path.join('share', package_name, 'piper_voices'), glob('piper_voices/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

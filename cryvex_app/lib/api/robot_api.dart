@@ -116,7 +116,8 @@ class RobotApi {
     }
   }
 
-  /// Sesi TELEFONDA DEĞİL, robotun kendi hoparlöründe (Pi'ye bağlı JBL vb.)
-  /// çaldırır - komutu telefondan verseniz bile ses robottan çıkar.
-  Future<void> speakHere(String text) => _postJson('/api/speak_here', {'text': text});
+  /// Robotun KENDİ ekranı konuşur (ses robotun hoparlöründen, ağız oynar);
+  /// [expr] verilirse (happy/love/alert/sad) robotun yüz ifadesi de değişir.
+  Future<void> speakHere(String text, {String expr = ''}) =>
+      _postJson('/api/speak_here', {'text': text, 'expr': expr});
 }
