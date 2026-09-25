@@ -61,6 +61,12 @@ def generate_launch_description():
         name='ydlidar_ros2_driver_node',
         output='screen',
         parameters=[os.path.join(pkg, 'config', 'ydlidar_tmini_plus.yaml'), {'use_sim_time': False}],
+        # YDLidar SDK acilista seri hatta kalmis eski baytlara denk gelirse
+        # (checksum hatalari -> "YdDataStream: read past end of buffer") COKUYOR
+        # ve bir daha kalkmiyordu (2026-09-25, servis yeniden baslatilinca).
+        # Cokerse 3sn sonra kendiliginden yeniden baslasin.
+        respawn=True,
+        respawn_delay=3.0,
     )
 
     ekf_node = Node(

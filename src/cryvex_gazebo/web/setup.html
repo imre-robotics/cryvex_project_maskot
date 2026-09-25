@@ -37,6 +37,14 @@
         margin-bottom: 12px;
     }
     #map-img { width: 100%; height: auto; display: block; image-rendering: pixelated; opacity: 0.92; }
+    #grid { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #grid line { stroke: rgba(0,229,255,0.28); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    #grid text { fill: rgba(0,140,170,0.75); font-size: 5.5px; font-weight: 700; font-family: inherit; }
+    #grid.hidden { display: none; }
+    .map-legend { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+        font-size: 0.78rem; color: var(--muted); margin: -6px 2px 12px; }
+    .map-legend b { font-weight: 700; }
+    .map-legend a { color: var(--cyan); text-decoration: none; white-space: nowrap; }
     #overlay { position: absolute; inset: 0; cursor: crosshair; }
     .marker {
         position: absolute; width: 22px; height: 22px; border-radius: 50%;
@@ -112,7 +120,12 @@
 
 <div class="map-wrap">
     <img id="map-img" src="/api/map.png" alt="Kafe haritası">
+    <svg id="grid" preserveAspectRatio="none"></svg>
     <div id="overlay"></div>
+</div>
+<div class="map-legend">
+    <span id="map-legend">▦ 1 kare = 1 metre</span>
+    <a href="#" id="btn-grid">ızgarayı gizle</a>
 </div>
 
 <div class="mode-bar">
@@ -174,7 +187,8 @@
     function setMode(m) {
         mode = m; pending = null;
         document.querySelectorAll('.mode-bar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-        if (m) { hint.textContent = `${MODE_LABEL[m]} için haritada konuma dokunun.`; hint.classList.remove('idle'); }
+        if (m === 'robot') { hint.textContent = 'Robotun ŞU AN durduğu yere dokunun (yaklaşık olması yeter).'; hint.classList.remove('idle'); }
+        else if (m) { hint.textContent = `${MODE_LABEL[m]} için haritada konuma dokunun.`; hint.classList.remove('idle'); }
         else { hint.textContent = 'Aşağıdan bir tür seçip haritada konuma dokunun.'; hint.classList.add('idle'); }
         render();
     }
@@ -191,7 +205,9 @@
 
         if (!pending) {
             pending = { x, y };
-            hint.textContent = `Şimdi ${MODE_LABEL[mode]}'nın BAKACAĞI yöne dokunun.`;
+            hint.textContent = mode === 'robot'
+                ? 'Şimdi robotun ÖNÜNÜN baktığı yöne dokunun.'
+                : `Şimdi ${MODE_LABEL[mode]}'nın BAKACAĞI yöne dokunun.`;
             render();
             return;
         }
@@ -220,8 +236,69 @@
         robotPose = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, yaw };
         render();
         const res = await apiPost('/api/set_pose', robotPose);
-        if (res && res.result === 'ok') toast('✅ Robot konumu ayarlandı (AMCL güncellendi)');
-        else toast('❌ Robot konumu ayarlanamadı: ' + (res && res.reason || 'bilinmeyen hata'));
+        if (res && res.result === 'ok') {
+            toast('✅ Robot konumu ayarlandı (AMCL güncellendi)');
+            if (liveActive) {
+                // Robot ipucunu ~5sn lidarla netlestirir; sonra mavi nokta = gercek tahmin.
+                hint.textContent = 'Kırmızı noktalar duvarların üstüne oturursa konum doğru. Oturmazsa tekrar deneyin.';
+                setTimeout(() => { robotPose = null; render(); }, 6000);
+            }
+        } else toast('❌ Robot konumu ayarlanamadı: ' + (res && res.reason || 'bilinmeyen hata'));
+    }
+
+    // ==================== ızgara (1 m kareler: A1, B1, ... "robotu C4'e koydum") ====================
+    const gridSvg = $('grid');
+    function colName(i) { return (i >= 26 ? String.fromCharCode(64 + Math.floor(i / 26)) : '') + String.fromCharCode(65 + i % 26); }
+    function buildGrid() {
+        const W = mapInfo.width, H = mapInfo.height, step = 1 / mapInfo.resolution;   // 1 m = kac piksel
+        gridSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+        let s = '';
+        for (let x = step; x < W; x += step) s += `<line x1="${x}" y1="0" x2="${x}" y2="${H}"/>`;
+        for (let y = step; y < H; y += step) s += `<line x1="0" y1="${y}" x2="${W}" y2="${y}"/>`;
+        for (let c = 0; c * step < W; c++)
+            for (let r = 0; r * step < H; r++)
+                s += `<text x="${c * step + 1.5}" y="${r * step + 6.5}">${colName(c)}${r + 1}</text>`;
+        gridSvg.innerHTML = s;
+    }
+    function setGridVisible(on, remember = true) {
+        gridSvg.classList.toggle('hidden', !on);
+        $('btn-grid').textContent = on ? 'ızgarayı gizle' : 'ızgarayı göster';
+        if (remember) try { localStorage.setItem('cryvex_grid', on ? '1' : '0'); } catch (e) { /* depolama yok, sorun degil */ }
+    }
+    $('btn-grid').addEventListener('click', (e) => { e.preventDefault(); setGridVisible(gridSvg.classList.contains('hidden')); });
+    try { if (localStorage.getItem('cryvex_grid') === '0') setGridVisible(false, false); } catch (e) { /* varsayilan: acik */ }
+
+    // ==================== canlı LiDAR (kırmızı = şu an görülen, mavi = robotun tahmini konumu) ====================
+    // Sadece canli harita KAYITLI haritayla ayni boyuttaysa kullanilir (aksi halde
+    // isaretler kayar) - yoksa duz /api/map.png kalir.
+    let liveActive = false, liveBusy = false, liveUrl = null;
+    async function refreshLive() {
+        if (liveBusy || document.hidden || !mapInfo) return;
+        liveBusy = true;
+        try {
+            const r = await fetch('/api/live_map.png?grid=0&_=' + Date.now());
+            if (!r.ok) throw new Error(r.status);
+            const url = URL.createObjectURL(await r.blob());
+            const probe = new Image();
+            await new Promise((ok, fail) => { probe.onload = ok; probe.onerror = fail; probe.src = url; });
+            if (probe.naturalWidth !== mapInfo.width || probe.naturalHeight !== mapInfo.height) {
+                URL.revokeObjectURL(url); throw new Error('boyut farkli');
+            }
+            mapImg.src = url;
+            if (liveUrl) URL.revokeObjectURL(liveUrl);
+            liveUrl = url;
+            setLive(true);
+        } catch (e) {
+            setLive(false);
+        } finally { liveBusy = false; }
+    }
+    function setLive(on) {
+        if (on === liveActive) return;
+        liveActive = on;
+        if (!on) { mapImg.src = '/api/map.png'; if (liveUrl) { URL.revokeObjectURL(liveUrl); liveUrl = null; } }
+        $('map-legend').innerHTML = '▦ 1 kare = 1 metre' + (on
+            ? ' · <b style="color:#ff2d2d">●</b> LiDAR\'ın şu an gördüğü · <b style="color:#00aaff">■</b> robotun kendini sandığı yer'
+            : '');
     }
 
     // ==================== çizim ====================
@@ -325,7 +402,10 @@
                 hint.classList.remove('idle');
             }
         } catch (e) { /* mode bilgisi alinamadi, sorun degil */ }
-        if (mapImg.complete) render(); else mapImg.addEventListener('load', render);
+        if (mapInfo.width) buildGrid();
+        if (mapImg.complete) render(); else mapImg.addEventListener('load', render, { once: true });
+        refreshLive();
+        setInterval(refreshLive, 1000);
     }
     init();
 

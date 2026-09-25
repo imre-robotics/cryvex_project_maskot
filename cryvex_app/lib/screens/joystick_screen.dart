@@ -302,23 +302,45 @@ class _JoystickScreenState extends State<JoystickScreen> {
   Widget _liveMapView() {
     final baseUrl = context.read<RobotState>().api!.baseUrl;
     final url = '$baseUrl/api/live_map.png?_=${_mapUrlNonce ?? '0'}';
-    return AspectRatio(
-      aspectRatio: 4 / 3,
-      child: Container(
-        margin: const EdgeInsets.only(top: 8),
-        decoration: BoxDecoration(
-          color: Colors.black,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: CryvexColors.cardLine),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Image.network(
-          url,
-          key: ValueKey(url),
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-          loadingBuilder: (ctx, child, progress) => progress == null ? child : _mapPlaceholder(),
-          errorBuilder: (ctx, err, st) => _mapPlaceholder(),
+    return GestureDetector(
+      // Dokununca tam ekran (iki parmakla yakinlastir/kaydir) - telefonda
+      // izgara etiketleri (A1, B2...) ve lidar noktalari rahat okunsun.
+      onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => _FullscreenLiveMap(baseUrl: baseUrl))),
+      child: AspectRatio(
+        aspectRatio: 1,
+        child: Container(
+          margin: const EdgeInsets.only(top: 8),
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: CryvexColors.cardLine),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(fit: StackFit.expand, children: [
+            Image.network(
+              url,
+              key: ValueKey(url),
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              loadingBuilder: (ctx, child, progress) => progress == null ? child : _mapPlaceholder(),
+              errorBuilder: (ctx, err, st) => _mapPlaceholder(),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(10)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.fullscreen, size: 16, color: CryvexColors.cyan),
+                  SizedBox(width: 4),
+                  Text('Büyüt', style: TextStyle(color: CryvexColors.cyan, fontSize: 12, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ]),
         ),
       ),
     );
@@ -354,6 +376,72 @@ class _JoystickScreenState extends State<JoystickScreen> {
             child: Text((_tables[i]['isim'] as String?) ?? 'Masa ${i + 1}'),
           ),
       ],
+    );
+  }
+}
+
+/// Canli haritanin tam ekran hali: iki parmakla yakinlastir, tek parmakla
+/// kaydir. Haritalama arkadaki ekranda surer (geri donunce joystick oradadir).
+class _FullscreenLiveMap extends StatefulWidget {
+  const _FullscreenLiveMap({required this.baseUrl});
+  final String baseUrl;
+
+  @override
+  State<_FullscreenLiveMap> createState() => _FullscreenLiveMapState();
+}
+
+class _FullscreenLiveMapState extends State<_FullscreenLiveMap> {
+  Timer? _timer;
+  String _nonce = DateTime.now().millisecondsSinceEpoch.toString();
+  // Yenilemede yakinlastirma sifirlanmasin diye disarida tutuluyor.
+  final _zoom = TransformationController();
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
+      if (mounted) setState(() => _nonce = DateTime.now().millisecondsSinceEpoch.toString());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _zoom.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = '${widget.baseUrl}/api/live_map.png?_=$_nonce';
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(title: const Text('Canlı Harita')),
+      body: SafeArea(
+        child: Column(children: [
+          Expanded(
+            child: InteractiveViewer(
+              transformationController: _zoom,
+              minScale: 1,
+              maxScale: 6,
+              child: Center(
+                child: Image.network(
+                  url,
+                  key: ValueKey(url),
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  errorBuilder: (ctx, err, st) => const SizedBox(),
+                ),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.all(10),
+            child: Text('İki parmakla yakınlaştır · kırmızı: LiDAR\'ın gördüğü · mavi ok: robotun önü',
+                style: TextStyle(color: CryvexColors.textMuted, fontSize: 12), textAlign: TextAlign.center),
+          ),
+        ]),
+      ),
     );
   }
 }

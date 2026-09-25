@@ -72,6 +72,13 @@ def generate_launch_description():
             # GECICI - bkz. yukaridaki docstring (sabit/gercek olmayan odom).
             'minimum_travel_distance': 0.0,
             'minimum_travel_heading': 0.0,
+            # GECICI: odom yokken hareketi SADECE tarama eslestirmesi bulur ve
+            # tahminin yalnizca ±25cm/±20° cevresine bakar. Varsayilan 0.5sn'de bir
+            # tarama islenince yuruyus hizinda (~50cm) konum kaybediliyor; her
+            # tarama (7 Hz, ~14cm) islenince alan icinde kalir. Odom gelince kaldirin.
+            'minimum_time_interval': 0.1,
+            # Canli harita (telefon/ekran) 5sn yerine 1sn'de bir guncellensin.
+            'map_update_interval': 1.0,
         }],
     )
 

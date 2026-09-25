@@ -21,7 +21,12 @@ ydlidar_ros2_driver_node:
     intensity_bit: 8
     abnormal_check_count: 4
     fixed_resolution: true
-    reversion: true
+    # reversion: taramayi 180° dondurur. Referanstaki "true" ile LiDAR'in
+    # ustundeki OK robotun ARKASINI gosteriyordu (2026-09-25 el testi: okun
+    # onunde duran kisi haritada mavi okun tam tersinde cikti). false ile
+    # lidar_link +x = LiDAR'in ustundeki ok -> govdeye OK ONE BAKACAK sekilde
+    # takin (URDF'te lidar dondurulmemis, rpy 0 0 0).
+    reversion: false
     inverted: true
     auto_reconnect: true
     isSingleChannel: false

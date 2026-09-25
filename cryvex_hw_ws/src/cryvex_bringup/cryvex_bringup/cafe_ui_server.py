@@ -29,8 +29,10 @@ index.html'de TEK SATIR degisiklik gerekmeyecek (zaten aynen kullaniliyor).
 """
 import ast
 import asyncio
+import functools
 import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -43,13 +45,18 @@ import urllib.parse
 import zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
+from rclpy.time import Time as RclpyTime
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
+from std_srvs.srv import Empty
+from tf2_ros import Buffer, TransformListener
 
 try:
     import edge_tts  # kurulu degilse yalnizca onbellekteki cumleler calinir
@@ -73,33 +80,139 @@ TTS_CACHE_DIR = os.path.expanduser('~/.cache/cryvex_tts')  # /tmp degil: acilist
 
 
 # ==================== PNG kodlama (tablet_server.py'den birebir) ====================
-def _gray_bytes_to_png(width, height, pixels):
+def _png_bytes(width, height, pixels, channels=1):
+    """channels: 1 = gri tonlu, 3 = RGB."""
+    stride = width * channels
     raw = bytearray()
     for y in range(height):
         raw.append(0)
-        raw.extend(pixels[y * width:(y + 1) * width])
+        raw.extend(pixels[y * stride:(y + 1) * stride])
     compressed = zlib.compress(bytes(raw), 6)
 
     def chunk(tag, payload):
         return (struct.pack('>I', len(payload)) + tag + payload +
                 struct.pack('>I', zlib.crc32(tag + payload) & 0xffffffff))
 
-    ihdr = struct.pack('>IIBBBBB', width, height, 8, 0, 0, 0, 0)
+    color_type = 0 if channels == 1 else 2
+    ihdr = struct.pack('>IIBBBBB', width, height, 8, color_type, 0, 0, 0)
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) +
             chunk(b'IDAT', compressed) + chunk(b'IEND', b''))
 
 
-def _occgrid_to_png_bytes(msg):
+def _occgrid_gray(msg):
+    """OccupancyGrid -> gri tonlu pikseller (PNG yonunde: ust satir = haritanin kuzeyi)."""
     w, h = msg.info.width, msg.info.height
-    data = msg.data
     pixels = bytearray(w * h)
-    for i, v in enumerate(data):
+    for i, v in enumerate(msg.data):
         pixels[i] = 205 if v < 0 else max(0, min(255, round(254 - (v / 100.0) * 254)))
     flipped = bytearray(w * h)
     for row in range(h):
         src, dst = row * w, (h - 1 - row) * w
         flipped[dst:dst + w] = pixels[src:src + w]
-    return _gray_bytes_to_png(w, h, bytes(flipped))
+    return flipped
+
+
+SCAN_RGB = (255, 45, 45)   # LiDAR'in su an gordugu noktalar
+ROBOT_RGB = (0, 170, 255)  # robotun konumu + onunun baktigi yon (ok)
+GRID_RGB = np.array((0, 150, 185), dtype=np.float32)        # 1 m'lik izgara cizgileri
+GRID_LABEL_RGB = np.array((0, 100, 130), dtype=np.float32)  # kare etiketleri (A1, B1, ...)
+GRID_SCALE = 4       # izgarali resimde her harita hucresi 4x4 piksel - etiketler telefonda okunsun
+GRID_FONT_SCALE = 5  # 3x5 harfin her pikseli 5x5 -> 15x25 piksel harf (1 m = 80 piksel)
+
+# 3x5 piksel yazi tipi (satir satir, soldan saga) - sadece kare etiketleri icin.
+_FONT_3X5 = {
+    '0': '111101101101111', '1': '010110010010111', '2': '111001111100111', '3': '111001111001111',
+    '4': '101101111001001', '5': '111100111001111', '6': '111100111101111', '7': '111001001001001',
+    '8': '111101111101111', '9': '111101111001111',
+    'A': '010101111101101', 'B': '110101110101110', 'C': '011100100100011', 'D': '110101101101110',
+    'E': '111100110100111', 'F': '111100110100100', 'G': '011100101101011', 'H': '101101111101101',
+    'I': '111010010010111', 'J': '001001001101010', 'K': '101101110101101', 'L': '100100100100111',
+    'M': '101111111101101', 'N': '111101101101101', 'O': '010101101101010', 'P': '110101110100100',
+    'Q': '010101101110011', 'R': '110101110101101', 'S': '011100010001110', 'T': '111010010010010',
+    'U': '101101101101111', 'V': '101101101101010', 'W': '101101111111101', 'X': '101101010101101',
+    'Y': '101101010010010', 'Z': '111001010100111',
+}
+
+
+def _grid_col_name(i):
+    # setup.html colName() ile AYNI: A..Z, sonra AA, AB, ...
+    return (chr(64 + i // 26) if i >= 26 else '') + chr(65 + i % 26)
+
+
+@functools.lru_cache(maxsize=512)
+def _text_mask(text, scale):
+    """Metin -> bool maske (3x5 harfler, aralarinda 1 piksel bosluk, her piksel scale x scale)."""
+    parts = []
+    for k, ch in enumerate(text):
+        if k:
+            parts.append(np.zeros((5, 1), dtype=np.uint8))
+        parts.append(np.array([int(b) for b in _FONT_3X5[ch]], dtype=np.uint8).reshape(5, 3))
+    return np.kron(np.hstack(parts), np.ones((scale, scale), dtype=np.uint8)).astype(bool)
+
+
+def _blend(region, color, alpha, mask=None):
+    """region (resmin bir gorunumu) uzerine rengi alpha seffafligiyla boyar (harita alttan gorunur)."""
+    if mask is None:
+        region[...] = region * (1.0 - alpha) + color * alpha
+    else:
+        region[mask] = region[mask] * (1.0 - alpha) + color * alpha
+
+
+def _live_map_png(msg, scan_xy, robot_pose, grid=True):
+    """Canli harita + LiDAR'in su an gordugu noktalar (kirmizi) + robot ve onunun
+    baktigi yon (mavi daire + ok). grid=True: silik 1 m'lik izgara ve kare
+    etiketleri (A1, B1, ...), etiketler okunsun diye resim GRID_SCALE kat buyuk.
+    Kare adlari setup.html'deki izgarayla AYNI (resmin sol ustu = A1)."""
+    w, h = msg.info.width, msg.info.height
+    res = msg.info.resolution
+    ox, oy = msg.info.origin.position.x, msg.info.origin.position.y
+    s = GRID_SCALE if grid else 1
+    gray = np.frombuffer(bytes(_occgrid_gray(msg)), dtype=np.uint8).reshape(h, w)
+    img = np.repeat(np.repeat(gray, s, axis=0), s, axis=1)[:, :, None].repeat(3, axis=2)
+    img_h, img_w = img.shape[:2]
+
+    if grid:
+        step = s / res  # 1 m kac piksel
+        for k in range(1, int(img_w / step) + 1):
+            x = round(k * step)
+            _blend(img[:, max(0, x - 1):x + 1], GRID_RGB, 0.4)
+        for k in range(1, int(img_h / step) + 1):
+            y = round(k * step)
+            _blend(img[max(0, y - 1):y + 1, :], GRID_RGB, 0.4)
+        pad = round(1.5 * s)
+        for c in range(math.ceil(img_w / step)):
+            for r in range(math.ceil(img_h / step)):
+                mask = _text_mask(f'{_grid_col_name(c)}{r + 1}', GRID_FONT_SCALE)
+                x0, y0 = round(c * step) + pad, round(r * step) + pad
+                sub = img[y0:y0 + mask.shape[0], x0:x0 + mask.shape[1]]
+                _blend(sub, GRID_LABEL_RGB, 0.55, mask[:sub.shape[0], :sub.shape[1]])
+
+    def to_px(x, y):
+        return (x - ox) / res * s, (h - (y - oy) / res) * s
+
+    def square(px, py, half, color):
+        c, r = math.floor(px), math.floor(py)
+        img[max(0, r - half):max(0, r + half + 1), max(0, c - half):max(0, c + half + 1)] = color
+
+    scan_half = max(1, (3 * s) // 2 - 1)
+    for x, y in scan_xy:
+        square(*to_px(x, y), scan_half, SCAN_RGB)
+    if robot_pose is not None:
+        rx, ry, yaw = robot_pose
+        cx, cy = to_px(rx, ry)
+        radius = 0.15 / res * s
+        yy, xx = np.ogrid[:img_h, :img_w]
+        img[(xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2] = ROBOT_RGB
+        # Ok: robotun ONU (base_footprint +x = lidar 0°, URDF'te lidar dondurulmemis).
+        length, thick = 0.6 / res * s, max(0, s // 2 - 1)
+        tip = (cx + length * math.cos(yaw), cy - length * math.sin(yaw))
+        head = length * 0.35
+        for (sx, sy), ang, seg in (((cx, cy), yaw, length),
+                                   (tip, yaw + math.radians(150), head),
+                                   (tip, yaw - math.radians(150), head)):
+            for i in range(int(seg * 2) + 1):  # yarim piksel adimlarla cizgi
+                square(sx + math.cos(ang) * i / 2, sy - math.sin(ang) * i / 2, thick, ROBOT_RGB)
+    return _png_bytes(img_w, img_h, img.tobytes(), 3)
 
 
 def _parse_pgm(path):
@@ -141,7 +254,7 @@ def _parse_pgm(path):
 
 def _pgm_to_png_bytes(path):
     width, height, pixels = _parse_pgm(path)
-    return _gray_bytes_to_png(width, height, pixels)
+    return _png_bytes(width, height, pixels)
 
 
 # ==================== Ses (TTS) ====================
@@ -289,8 +402,14 @@ class CafeUiServerNode(Node):
         self.speak_text, self.speak_expr, self.speak_seq = '', '', 0
 
         self.create_subscription(OccupancyGrid, '/map', self._map_cb, MAP_QOS)
+        self._scan_msg, self._scan_rx = None, 0.0
+        self.create_subscription(LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.command_pub = self.create_publisher(String, '/patrol_command', 10)  # dinleyen yok, zararsiz
+        self.initialpose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
+        self.nomotion_cli = self.create_client(Empty, '/request_nomotion_update')
         self.launch_mgr = LaunchManager(self)
 
         self._httpd = ThreadingHTTPServer(('0.0.0.0', port), self._make_handler())
@@ -319,12 +438,62 @@ class CafeUiServerNode(Node):
         with self._lock:
             self._live_map_msg = msg
 
-    def live_map_png_bytes(self):
+    def _scan_cb(self, msg):
+        self._scan_msg, self._scan_rx = msg, time.monotonic()
+
+    def _scan_in_map(self):
+        """LiDAR'in su an gordugu noktalar ve kendi pozu (x, y, yaw), harita cercevesinde.
+        Tarama 1sn'den eskiyse ya da harita cercevesi henuz yoksa ([], None)."""
+        scan = self._scan_msg
+        if scan is None or time.monotonic() - self._scan_rx > 1.0:
+            return [], None
+        try:
+            tf = self.tf_buffer.lookup_transform('map', scan.header.frame_id, RclpyTime())
+        except Exception:  # noqa: BLE001
+            return [], None
+        t, q = tf.transform.translation, tf.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        points = []
+        angle = scan.angle_min + yaw
+        for r in scan.ranges:
+            if scan.range_min <= r <= scan.range_max:  # NaN/inf de burada elenir
+                points.append((t.x + r * math.cos(angle), t.y + r * math.sin(angle)))
+            angle += scan.angle_increment
+        return points, (t.x, t.y, yaw)
+
+    def live_map_png_bytes(self, grid=True):
         with self._lock:
             msg = self._live_map_msg
         if msg is None or msg.info.width == 0:
             return None
-        return _occgrid_to_png_bytes(msg)
+        points, robot = self._scan_in_map()
+        return _live_map_png(msg, points, robot, grid)
+
+    def set_robot_pose(self, x, y, yaw):
+        """Kurulum ekranindaki "Robot Burada": AMCL'e kaba ipucu (±0.5m, ±30°).
+        Tekerlek odometrisi yokken AMCL robot hareket etmedikce guncellenmez -
+        bu yuzden ardindan ~5sn boyunca "hareketsiz guncelleme" istenir ve
+        lidar ipucunu duvarlara oturtarak netlestirir (odom gelince de zararsiz)."""
+        if self.initialpose_pub.get_subscription_count() == 0:
+            raise RuntimeError('konum sistemi (AMCL) calismiyor')
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = 'map'
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x, msg.pose.pose.position.y = x, y
+        msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        msg.pose.covariance[0] = msg.pose.covariance[7] = 0.5 ** 2
+        msg.pose.covariance[35] = math.radians(30.0) ** 2
+        self.initialpose_pub.publish(msg)
+        self.get_logger().info(f'Robot konumu ayarlandi: x={x:.2f} y={y:.2f} yaw={math.degrees(yaw):.0f}°')
+        threading.Thread(target=self._refine_pose, daemon=True).start()
+
+    def _refine_pose(self):
+        time.sleep(0.5)  # AMCL once /initialpose'u islesin
+        for _ in range(15):  # lidar 7 Hz: her istek bir sonraki taramada islenir
+            if self.nomotion_cli.service_is_ready():
+                self.nomotion_cli.call_async(Empty.Request())
+            time.sleep(0.3)
 
     def map_info(self):
         info = {'resolution': 0.05, 'origin': [0.0, 0.0, 0.0], 'image': 'cafe_map.pgm'}
@@ -464,6 +633,9 @@ class CafeUiServerNode(Node):
                     return
                 self.send_response(200)
                 self.send_header('Content-Type', content_type)
+                # Telefonun WebView'i sayfayi saklayip guncellemeden sonra da ESKISINI
+                # gosteriyordu (kurulum izgarasi gorunmedi) - her acilista yeniden alsin.
+                self.send_header('Cache-Control', 'no-store')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -479,7 +651,9 @@ class CafeUiServerNode(Node):
                 elif path == '/api/status':
                     self._send_json(node_self.status_payload())
                 elif path == '/api/live_map.png':
-                    png = node_self.live_map_png_bytes()
+                    # ?grid=0: izgarasiz, haritayla ayni boyut (setup.html kendi izgarasini cizer)
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                    png = node_self.live_map_png_bytes(grid=qs.get('grid', ['1'])[0] != '0')
                     if png is None:
                         self.send_error(503, 'Henuz canli harita yok')
                         return
@@ -607,6 +781,17 @@ class CafeUiServerNode(Node):
                         return
                     expr = d.get('expr', '')
                     node_self.request_robot_speech(text, expr if expr in ROBOT_EXPRESSIONS else '')
+                    self._send_json({'result': 'ok'})
+                elif path == '/api/set_pose':
+                    # govde: {"x": m, "y": m, "yaw": rad} (harita cercevesi)
+                    try:
+                        node_self.set_robot_pose(float(d['x']), float(d['y']), float(d['yaw']))
+                    except (KeyError, TypeError, ValueError):
+                        self._send_json({'result': 'error', 'reason': 'x, y, yaw gerekli'})
+                        return
+                    except RuntimeError as e:
+                        self._send_json({'result': 'error', 'reason': str(e)})
+                        return
                     self._send_json({'result': 'ok'})
                 elif path.startswith('/api/'):
                     # patrol.py'ye ozel diger komutlar (start_patrol, goto,
