@@ -17,16 +17,57 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
+// Robot yüzü renk paletleri - göz/ağız/ışık parlak, yüz (arka plan) koyu
+// tonlar: açık arka planda beyaz göz akı kaybolur.
+const _brightColors = <(String, String)>[
+  ('Turkuaz', '#00d4ff'), ('Mavi', '#1fa2ff'), ('Lacivert', '#3b5bff'), ('Mor', '#a855ff'),
+  ('Pembe', '#ff5fc8'), ('Kırmızı', '#ff3355'), ('Turuncu', '#ff8a00'), ('Sarı', '#ffd500'),
+  ('Yeşil', '#00e676'), ('Beyaz', '#f2f5ff'),
+];
+const _faceColors = <(String, String)>[
+  ('Gece', '#06060e'), ('Lacivert', '#0a1030'), ('Mor', '#1a0a2e'),
+  ('Bordo', '#2a0a14'), ('Orman', '#06201a'), ('Antrasit', '#1c1c22'),
+];
+
 class _DashboardScreenState extends State<DashboardScreen> {
   int _volume = 50;
   bool _volumeLoaded = false;
   Timer? _volumeDebounce;
+  Map<String, String> _theme = {};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => context.read<RobotState>().startPolling());
     _loadVolume();
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    final t = await _api.getTheme();
+    if (mounted && t != null) setState(() => _theme = t);
+  }
+
+  Future<void> _setThemeColor(String key, String hex) async {
+    setState(() => _theme = {..._theme, key: hex});   // aninda secili goster
+    try {
+      final res = await _api.setTheme({key: hex});
+      final t = res['theme'];
+      if (mounted && t is Map) setState(() => _theme = t.map((k, v) => MapEntry('$k', '$v')));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Renk gönderilemedi')));
+      }
+      _loadTheme();
+    }
+  }
+
+  Future<void> _resetTheme() async {
+    try {
+      final res = await _api.setTheme({'reset': true});
+      final t = res['theme'];
+      if (mounted && t is Map) setState(() => _theme = t.map((k, v) => MapEntry('$k', '$v')));
+    } catch (_) {/* baglanti yok - bir sonraki acilista yuklenir */}
   }
 
   Future<void> _loadVolume() async {
@@ -120,6 +161,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     () => _openJoystick(JoyMode.map)),
                 _actionButton('📍 Masa/Kapı Noktaları', CryvexButtonStyle.gray,
                     () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SetupWebviewScreen()))),
+                const SizedBox(height: 18),
+                _sectionLabel('🎨 Robotun Görünümü'),
+                _themeCard(),
               ],
             ),
           ),
@@ -163,6 +207,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _themeCard() {
+    Widget row(String label, String key, List<(String, String)> palette) {
+      final current = (_theme[key] ?? '').toLowerCase();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final (name, hex) in palette)
+              Tooltip(
+                message: name,
+                child: GestureDetector(
+                  onTap: () => _setThemeColor(key, hex),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Color(int.parse('FF${hex.substring(1)}', radix: 16)),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: current == hex ? Colors.white : Colors.white24,
+                        width: current == hex ? 3 : 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
+        ]),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      decoration: BoxDecoration(
+        color: CryvexColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CryvexColors.cardLine),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        row('👁 Göz', 'eye', _brightColors),
+        row('👄 Ağız', 'mouth', _brightColors),
+        row('✨ Yürüyen ışık', 'light', _brightColors),
+        row('🙂 Yüz (arka plan)', 'face', _faceColors),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(onPressed: _resetTheme, child: const Text('↺ Varsayılan renkler')),
+        ),
+      ]),
+    );
+  }
+
   Widget _statusCard(RobotState st) {
     final dotColor = st.isLive ? CryvexColors.green : CryvexColors.amber;
     return Container(
@@ -178,7 +275,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
             const SizedBox(width: 8),
-            Text(st.isLive ? 'Robot bağlı' : 'Robota ulaşılamıyor…', style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+            Text(
+                st.isLive
+                    ? 'Robot bağlı · ${st.ip}'
+                    : (st.searching ? 'Robot ağda aranıyor…' : 'Robota ulaşılamıyor…'),
+                style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
           ]),
           const SizedBox(height: 8),
           Row(children: [

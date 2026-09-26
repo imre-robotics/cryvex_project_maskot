@@ -12,6 +12,10 @@ static volatile uint16_t s_rx_len;
 static char s_pending_line[LINE_MAX];
 static volatile bool s_line_ready;
 
+/* READY satirindaki bilgiler (app_init doldurur, "INFO" ile tekrar sorulabilir). */
+static const char *s_reset_cause = "?";
+static bool s_imu_ok;
+
 static void clamp_targets(void)
 {
     if (s_state.linear_mm_s > MAX_LINEAR_MM_S)  s_state.linear_mm_s = MAX_LINEAR_MM_S;
@@ -77,6 +81,10 @@ void protocol_poll(void)
         s_state.linear_mm_s = 0;
         s_state.angular_mrad_s = 0;
         s_state.last_cmd_tick = HAL_GetTick();
+    } else if (strncmp(line, "INFO", 4) == 0) {
+        /* Pi baglandiginda sorar: kart acilistaki READY'yi Pi dinlemiyorken
+         * gondermis olabilir. Watchdog'u BESLEMEZ (hareket komutu degil). */
+        protocol_send_ready();
     }
     /* Bilinmeyen/bozuk satir: sessizce yok say (watchdog zaten koruyor). */
 }
@@ -109,8 +117,20 @@ void protocol_send_status(int32_t fl_mm, int32_t fr_mm, int32_t rl_mm, int32_t r
     }
 }
 
+void protocol_set_info(const char *reset_cause, bool imu_ok)
+{
+    s_reset_cause = reset_cause;
+    s_imu_ok = imu_ok;
+}
+
 void protocol_send_ready(void)
 {
-    const char msg[] = "READY\n";
-    HAL_UART_Transmit(s_huart, (uint8_t *)msg, sizeof(msg) - 1, 20);
+    /* "READY fw=1.1.0 reset=power imu=0" - reset: power|pin|sw|iwdg|wwdg|bor|?
+     * (iwdg = kart takilmis, DONANIM bekcisi yeniden baslatti). */
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "READY fw=%s reset=%s imu=%d\n",
+                     FW_VERSION, s_reset_cause, s_imu_ok ? 1 : 0);
+    if (n > 0) {
+        HAL_UART_Transmit(s_huart, (uint8_t *)buf, (uint16_t)n, 20);
+    }
 }

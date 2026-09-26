@@ -34,8 +34,8 @@ paylaşır, bu yüzden aşağıdaki pinler F446RE için de geçerli.
 | **TIM2** | Internal Clock, 1 MHz sayaç — **Prescaler = 89** (TIM2 APB1 üzerinde, APB1 prescaler ≠1 olduğu için timer saati APB1Freq'in 2 katı = 90 MHz'dir, 180 MHz DEĞİL — CubeMX'in "Clock Configuration" sekmesindeki "APB1 Timer clocks" değerine bakıp `Prescaler = (o_deger/1MHz)-1` formülünü kullanın), Period = 0xFFFFFFFF (32-bit free-running) | — | HC-SR04 echo süresi ölçümü için ortak "mikrosaniye saati" |
 | GPIO\_EXTI | External Interrupt (Rising+Falling) | PC0=FL_ECHO, PC1=FR_ECHO, PC2=RL_ECHO, PC3=RR_ECHO (lojik dönüştürücüden 3.3V) | 4× HC-SR04 echo darbe genişliği ölçümü |
 | GPIO\_Output | Push-Pull | PC4=FL_TRIG, PC5=FR_TRIG, PC6=RL_TRIG, PC7=RR_TRIG | 4× HC-SR04 tetikleme |
-| GPIO\_Input | Pull-up | PA0 | Tampon switch'leri (seri/NC hat - herhangi biri açılırsa veya kablo koparsa hat LOW olur). Her turda okunur (kesme gerekmez, hız kritik değil). |
-| GPIO\_Input | Pull-up | PA1 | Acil stop butonunun 2. kontağı (yazılımsal bilgi - motor gücü zaten röle ile donanımsal kesiliyor). Her turda okunur. |
+| GPIO\_Input | Pull-up | PA0 | Tampon switch'leri: NC kontaklar SERİ bağlanıp **PA0 ile GND arasına** takılır. Sağlamken hat LOW; herhangi biri açılırsa, kablo koparsa veya hiç bağlı değilse pull-up hattı HIGH yapar = "basıldı" (güvenli taraf). Her turda okunur (kesme gerekmez, hız kritik değil). |
+| GPIO\_Input | Pull-up | PA1 | Acil stop butonunun 2. (NC) kontağı **PA1 ile GND arasına** (yazılımsal bilgi - motor gücü zaten röle ile donanımsal kesiliyor). Aynı mantık: HIGH = basıldı/kopuk. Her turda okunur. **Tezgâh testi:** tampon/acil stop henüz yoksa PA0 ve PA1'i jumper ile GND'ye bağlayın, yoksa motorlar hiç dönmez (bilerek). |
 
 **2026-09-18 değişikliği**: eskiden burada USART1 (PA9/PA10) motor sürücüye
 UART çerçevesi göndermek için kullanılıyordu. Motor sürücü ekibinin DM556

@@ -18,15 +18,13 @@ gecis launch olaylariyla tetikleniyor: launch_ros node'un servisi hazir olana
 kadar KENDISI bekler (sabit gecikme yok - acilista DDS kesfi yavas olsa da
 calisir), configure bitince (inactive) activate gelir.
 
-GECICI: STM32/motor henuz baglanmadigi icin ekf_filter_node hicbir girdi
-(wheel/odom, imu/data_raw) alamiyor ve "odom" TF cercevesini HIC yayinlamiyor
-- slam_toolbox bu cerceve olmadan calisamaz (map/odom/base_footprint zincirini
-kuramaz, /map asla yayinlanmaz). Bu yuzden burada odom->base_footprint icin
-SABIT (0,0,0) bir static_transform_publisher ekliyoruz - gercek odometri
-DEGIL, sadece boru hattini acmak icin. Sonuc: slam_toolbox konum tahminini
-SADECE lidar tarama-eslestirmesinden (scan matching) cikarir, tekerlek geri
-bildirimi yok. STM32/motor baglanip ekf_filter_node gercek "odom" TF'ini
-yayinlamaya baslayinca BU NODE'U KALDIRIN (asagidaki static_odom_tf).
+odom -> base_footprint TF'ini HER ZAMAN EKF yayinlar (2026-09-26'dan beri):
+STM32 bagliyken gercek teker odometrisiyle, bagli degilken stm32_bridge
+"robot duruyor" (sifir hiz) odometrisi yayinlar - motorlar STM32 olmadan
+zaten donemez. (Eskiden burada SABIT bir odom TF'i vardi; STM32 baglaninca
+EKF'le catisacakti.) fake_odom:=true sadece EKF/koprusuz elle hata ayiklama
+icindir. LiDAR elde tasinirken teker odometrisi hareketi gormez; slam_toolbox
+konumu yine tarama-eslestirmesinden (scan matching) cikarir.
 
 GECICI (devami): slam_toolbox varsayilan olarak "odom" girdisine gore en az
 0.5m/0.5rad hareket algilamadan yeni bir tarama ISLEMEZ (minimum_travel_*).
@@ -42,6 +40,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import LifecycleNode, Node
@@ -82,15 +81,18 @@ def generate_launch_description():
         }],
     )
 
-    # GECICI - bkz. yukaridaki modul docstring'i. STM32/motor baglaninca kaldirin.
+    # Sadece hata ayiklama (bkz. modul docstring'i) - normalde EKF yayinlar.
+    fake_odom = LaunchConfiguration('fake_odom')
+    declare_fake_odom = DeclareLaunchArgument(
+        'fake_odom', default_value='false',
+        description='Sadece hata ayiklama: EKF yerine sabit odom->base_footprint.')
     static_odom_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='cryvex_temp_odom_tf',
         output='screen',
-        arguments=['--x', '0', '--y', '0', '--z', '0',
-                   '--yaw', '0', '--pitch', '0', '--roll', '0',
-                   '--frame-id', 'odom', '--child-frame-id', 'base_footprint'],
+        arguments=['--frame-id', 'odom', '--child-frame-id', 'base_footprint'],
+        condition=IfCondition(fake_odom),
     )
 
     configure_slam = EmitEvent(event=ChangeState(
@@ -105,6 +107,7 @@ def generate_launch_description():
     return LaunchDescription([
         declare_use_sim_time,
         declare_slam_params,
+        declare_fake_odom,
         static_odom_tf,
         slam_toolbox_node,
         configure_slam,

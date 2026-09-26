@@ -4,8 +4,8 @@ import '../state/robot_state.dart';
 import '../theme.dart';
 import 'dashboard_screen.dart';
 
-/// Robotun WiFi IP'sini bir kere gir, uygulama hatırlasın - tarayıcıda her
-/// seferinde adres çubuğuna yazmak yerine.
+/// Robotu ağda KENDİSİ bulur (discovery.dart) - IP girmek sadece yedek:
+/// açılır açılmaz arar, bulursa doğrudan Ana Panel'e geçer.
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
 
@@ -23,6 +23,19 @@ class _ConnectScreenState extends State<ConnectScreen> {
     super.initState();
     final st = context.read<RobotState>();
     if (st.ip != null) _ctrl.text = st.ip!;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _search());
+  }
+
+  Future<void> _search() async {
+    setState(() => _error = null);
+    final st = context.read<RobotState>();
+    final ok = await st.findRobot();
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DashboardScreen()));
+    } else {
+      setState(() => _error = 'Robot bulunamadı: robot açık mı, telefon robotla aynı WiFi\'de mi?');
+    }
   }
 
   Future<void> _connect() async {
@@ -45,6 +58,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final searching = context.watch<RobotState>().searching;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -65,7 +79,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   ),
                 ),
                 const SizedBox(height: 28),
-                const Text('Robotun WiFi IP adresi', style: TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: CryvexButtonStyle.cyan,
+                    onPressed: searching ? null : _search,
+                    child: searching
+                        ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: CryvexColors.cyan)),
+                            SizedBox(width: 10),
+                            Text('Robot aranıyor…'),
+                          ])
+                        : const Text('🔍 Robotu Bul'),
+                  ),
+                ),
+                const SizedBox(height: 26),
+                const Text('Bulunamazsa: robotun IP adresi', style: TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _ctrl,
@@ -92,18 +121,17 @@ class _ConnectScreenState extends State<ConnectScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    style: CryvexButtonStyle.cyan,
-                    onPressed: _checking ? null : _connect,
+                    style: CryvexButtonStyle.gray,
+                    onPressed: _checking || searching ? null : _connect,
                     child: _checking
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: CryvexColors.cyan))
-                        : const Text('Bağlan'),
+                        : const Text('Bu adrese bağlan'),
                   ),
                 ),
                 const SizedBox(height: 14),
                 const Text(
-                  'Telefonun robotla AYNI WiFi ağında olması gerekir. IP\'yi robotun\n'
-                  'tablet ekranındaki başlangıç yazısında veya "ifconfig/hostname -I"\n'
-                  'ile görebilirsiniz.',
+                  'Telefonun robotla AYNI WiFi ağında olması gerekir. Uygulama robotu\n'
+                  'kendisi bulur; adres değişse bile tekrar arar.',
                   style: TextStyle(color: CryvexColors.textMuted, fontSize: 11.5, height: 1.5),
                   textAlign: TextAlign.center,
                 ),

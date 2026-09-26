@@ -95,6 +95,8 @@ class Stm32Bridge(Node):
         self._last_batt_low = False
         self._ser = None
         self._stop_flag = False
+        self._imu_ok = None   # kart READY/INFO'da bildirir; None = bilinmiyor (eski yazilim)
+        self._info_received = False
 
         # Acik-cevrim teker odometrisi entegrasyon durumu (bkz. dosya basi notu).
         self._odom_x = 0.0
@@ -103,9 +105,11 @@ class Stm32Bridge(Node):
         self._last_left_mm = None
         self._last_right_mm = None
         self._last_odom_stamp = None
+        self._last_real_odom_t = 0.0   # son GERCEK (STM32'den) odometri, monotonic
 
         self.create_subscription(Twist, '/cmd_vel', self._cmd_vel_cb, 10)
         self.create_timer(CMD_RESEND_PERIOD_S, self._resend_cmd)
+        self.create_timer(0.05, self._odom_keepalive)   # 20 Hz, STM32'nin S satiri hiziyla ayni
 
         if serial is None:
             self.get_logger().error(
@@ -113,15 +117,47 @@ class Stm32Bridge(Node):
                 "- STM32 koprusu calismayacak.")
             return
 
-        try:
-            self._ser = serial.Serial(port, baud, timeout=0.2)
-        except Exception as exc:  # noqa: BLE001
-            self.get_logger().error(f"Seri port acilamadi ({port} @ {baud}): {exc}")
-            return
-
-        self._rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
+        # Port acilista yoksa ya da kablo cikip takilirsa kendiliginden
+        # (yeniden) baglanir - eskiden sadece acilista bir kez deneniyordu,
+        # kart sonradan takilinca servisi yeniden baslatmak gerekiyordu.
+        self._port, self._baud = port, baud
+        self._rx_thread = threading.Thread(target=self._serial_loop, daemon=True)
         self._rx_thread.start()
-        self.get_logger().info(f'STM32 koprusu hazir: {port} @ {baud}')
+
+    def _serial_loop(self):
+        warned = False
+        while not self._stop_flag and rclpy.ok():
+            try:
+                ser = serial.Serial(self._port, self._baud, timeout=0.2)
+            except Exception as exc:  # noqa: BLE001
+                if not warned:
+                    self.get_logger().error(
+                        f'Seri port acilamadi ({self._port} @ {self._baud}): {exc} - '
+                        'STM32 takilinca otomatik baglanilacak.')
+                    warned = True
+                time.sleep(2.0)
+                continue
+            warned = False
+            self._reset_odom_baseline()
+            self._info_received = False
+            self._ser = ser
+            self.get_logger().info(f'STM32 baglandi: {self._port} @ {self._baud}')
+            self._rx_loop(ser)         # kablo cikana kadar burada
+            self._ser = None
+            try:
+                ser.close()
+            except Exception:  # noqa: BLE001
+                pass
+            if not self._stop_flag:
+                self.get_logger().warn('STM32 baglantisi koptu - yeniden baglanmaya calisiliyor.')
+                time.sleep(1.0)
+
+    def _reset_odom_baseline(self):
+        # Kart yeniden baslayinca (guc, bekci, yukleme) teker sayaclari 0'dan
+        # baslar - eski degerle fark alinirsa robot bir anda metrelerce geri
+        # gitmis sanilir. Bir sonraki S satiri yeni baslangic olur.
+        self._last_left_mm = None
+        self._last_right_mm = None
 
     # ---- Pi5 -> STM32 ----
     def _cmd_vel_cb(self, msg: Twist):
@@ -147,15 +183,27 @@ class Stm32Bridge(Node):
             self.get_logger().warn(f'STM32 yazma hatasi: {exc}')
 
     # ---- STM32 -> Pi5 ----
-    def _rx_loop(self):
+    def _rx_loop(self, ser):
         buf = b''
+        info_tries, next_info = 0, 0.0
         while not self._stop_flag and rclpy.ok():
+            # Kart bilgisini (surum / acilis nedeni / IMU) cevap gelene kadar
+            # saniyede bir, en fazla 5 kez sor. Bastaki '\n': onceki oturumdan
+            # kartta yarim kalmis bir satir varsa (ornegin "V 20") INFO onun
+            # devamina eklenip anlasilmaz olmasin (2026-09-26'da boyle kayboldu).
+            if not self._info_received and info_tries < 5 and time.monotonic() >= next_info:
+                try:
+                    ser.write(b'\nINFO\n')
+                except Exception:  # noqa: BLE001
+                    pass
+                info_tries += 1
+                next_info = time.monotonic() + 1.0
             try:
-                chunk = self._ser.read(256)
+                chunk = ser.read(256)
             except Exception as exc:  # noqa: BLE001
-                self.get_logger().warn(f'STM32 okuma hatasi: {exc}')
-                time.sleep(0.5)
-                continue
+                if not self._stop_flag:   # kapanirken port kapatildi - uyari degil
+                    self.get_logger().warn(f'STM32 okuma hatasi: {exc}')
+                return   # kablo cikti vb. - _serial_loop yeniden baglanir
             if not chunk:
                 continue
             buf += chunk
@@ -166,8 +214,21 @@ class Stm32Bridge(Node):
     def _handle_line(self, line):
         if not line:
             return
-        if line == 'READY':
-            self.get_logger().info('STM32 hazir (READY alindi).')
+        if line.startswith('READY'):
+            # "READY fw=1.1.0 reset=power imu=0" (eski yazilim: sadece "READY")
+            info = dict(tok.split('=', 1) for tok in line.split()[1:] if '=' in tok)
+            self._info_received = True
+            if info.get('reset') and info.get('reset') != '?':
+                self._reset_odom_baseline()   # kart yeniden basladi: sayaclar 0'dan
+            if 'imu' in info:
+                self._imu_ok = info['imu'] == '1'
+            self.get_logger().info(
+                f"STM32 hazir: yazilim {info.get('fw', '?')}, acilis nedeni {info.get('reset', '?')}, "
+                f"IMU {'var' if self._imu_ok else 'YOK - /imu/data_raw yayinlanmiyor'}")
+            if info.get('reset') == 'iwdg':
+                self.get_logger().error(
+                    'STM32 TAKILMIS ve donanim bekcisi (IWDG) yeniden baslatmis - kart yazilimi '
+                    'incelenmeli (motorlar o anda durdu).')
             return
         if line.startswith('ERR'):
             self.get_logger().warn(f'STM32 hata bildirdi: {line}')
@@ -187,13 +248,17 @@ class Stm32Bridge(Node):
         for key, mm in zip(SONAR_ORDER, (fl, fr, rl, rr)):
             self._publish_range(key, mm, now)
 
-        imu_msg = Imu()
-        imu_msg.header.stamp = now
-        imu_msg.header.frame_id = 'imu_link'
-        imu_msg.angular_velocity.z = imu_wz / 1000.0  # mrad/s -> rad/s
-        imu_msg.orientation_covariance[0] = -1.0       # oryantasyon yok (REP-145)
-        imu_msg.linear_acceleration_covariance[0] = -1.0
-        self.imu_pub.publish(imu_msg)
+        # IMU takili degilse kart 0 gonderir; bunu yayinlamak EKF'ye "robot hic
+        # donmuyor" dedirtir (tekerlekler donerken bile). Kart READY/INFO'da
+        # imu=0 derse yayinlama. (Eski yazilim bilgi vermez: None -> yayinla.)
+        if self._imu_ok is not False:
+            imu_msg = Imu()
+            imu_msg.header.stamp = now
+            imu_msg.header.frame_id = 'imu_link'
+            imu_msg.angular_velocity.z = imu_wz / 1000.0  # mrad/s -> rad/s
+            imu_msg.orientation_covariance[0] = -1.0       # oryantasyon yok (REP-145)
+            imu_msg.linear_acceleration_covariance[0] = -1.0
+            self.imu_pub.publish(imu_msg)
 
         self._publish_wheel_odom(left_mm, right_mm, now)
         self._publish_battery(batt_mv, now)
@@ -250,7 +315,10 @@ class Stm32Bridge(Node):
 
         vx = d_center / dt if dt > 1e-6 else 0.0
         vyaw = d_yaw / dt if dt > 1e-6 else 0.0
+        self._emit_odom(stamp, vx, vyaw)
+        self._last_real_odom_t = time.monotonic()
 
+    def _emit_odom(self, stamp, vx, vyaw):
         msg = Odometry()
         msg.header.stamp = stamp
         msg.header.frame_id = 'odom'
@@ -262,6 +330,15 @@ class Stm32Bridge(Node):
         msg.twist.twist.linear.x = vx
         msg.twist.twist.angular.z = vyaw
         self.wheel_odom_pub.publish(msg)
+
+    def _odom_keepalive(self):
+        # STM32 bagli degil / sessizken motorlar zaten donemez: robot DURUYOR.
+        # Son konumu sifir hizla yayinlamaya devam et ki EKF odom->base_footprint
+        # TF'ini hep yayinlasin. Boylece launch dosyalarinda "sahte (sabit) odom"
+        # gerekmez ve kart takilip cikarilinca hicbir ayar degismez - eskiden
+        # STM32 baglaninca sabit TF ile EKF catisiyordu (elle kapatmak gerekiyordu).
+        if time.monotonic() - self._last_real_odom_t > 0.3:
+            self._emit_odom(self.get_clock().now().to_msg(), 0.0, 0.0)
 
     def _publish_battery(self, batt_mv, stamp):
         # Durum ekrani/loglama icin - SoC/yuzde HESAPLANMAZ (o kapsam disi,
@@ -312,7 +389,8 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():   # Ctrl+C/launch SIGINT'i ROS'u zaten kapatmis olabilir
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

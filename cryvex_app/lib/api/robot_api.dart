@@ -102,6 +102,19 @@ class RobotApi {
 
   Future<void> setVolume(int pct) => _postJson('/api/volume', {'volume': pct});
 
+  // ---- robot yüzünün renkleri: eye / mouth / light (yürüyen ışık) / face ----
+  Future<Map<String, String>?> getTheme() async {
+    try {
+      final data = await _getJson('/api/theme');
+      return data.map((k, v) => MapEntry(k, v.toString()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// changes: {'eye': '#ff3355'} gibi; {'reset': true} = varsayılan renkler.
+  Future<Map<String, dynamic>> setTheme(Map<String, dynamic> changes) => _postJson('/api/theme', changes);
+
   /// Robotun gerçek sesi (Piper/edge-tts) - text -> ses bayt dizisi ya da
   /// null (sunucu üretemedi, ör. sessizce geç).
   Future<Uint8List?> fetchTtsAudio(String text) async {

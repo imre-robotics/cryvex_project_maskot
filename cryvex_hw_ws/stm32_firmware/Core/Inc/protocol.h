@@ -33,7 +33,11 @@ void protocol_send_status(int32_t fl_mm, int32_t fr_mm, int32_t rl_mm, int32_t r
                            int32_t imu_wz_mrad_s, bool estop, bool bumper,
                            int32_t left_mm, int32_t right_mm, int32_t batt_mv);
 
-/* Aciliskta bir kez: "READY\n" */
+/* READY satirinin bilgileri (app_init'te bir kez). reset_cause sabit bir
+ * dizge olmali (isaretcisi saklanir). */
+void protocol_set_info(const char *reset_cause, bool imu_ok);
+
+/* Acilista bir kez ve "INFO" komutuna: "READY fw=<surum> reset=<neden> imu=<0|1>\n" */
 void protocol_send_ready(void);
 
 /* HAL_UART_RxCpltCallback icinden cagrilmali (main.c'ye tek satir eklenir -

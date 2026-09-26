@@ -144,8 +144,12 @@ void SysTick_Handler(void)
   /* USER CODE BEGIN SysTick_IRQn 0 */
 
   /* USER CODE END SysTick_IRQn 0 */
+  HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-
+  /* 2026-09-26: HAL_IncTick() .ioc'deki NVIC.SysTick_IRQn "HAL handler cagir"
+   * alani false oldugu icin URETILMEMISTI - HAL_GetTick() hep 0 kaldi: I2C
+   * (IMU yokken) zaman asimi hic dolmadi, durum satiri hic gitmedi ve 200 ms
+   * watchdog'u HIC tetiklenemezdi. .ioc de duzeltildi (yeniden uretimde kalir). */
   /* USER CODE END SysTick_IRQn 1 */
 }
 

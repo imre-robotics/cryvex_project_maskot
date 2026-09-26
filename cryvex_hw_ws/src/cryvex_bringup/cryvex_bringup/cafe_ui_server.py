@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import struct
 import subprocess
 import tempfile
@@ -71,12 +72,19 @@ MAP_QOS = QoSProfile(
 
 MAP_BACKUP_KEEP = 10  # "Bitir" oncesi yedeklenen eski haritalardan kac tanesi tutulsun
 
-# GECICI: STM32/motor yokken EKF odom TF'i yayinlamiyor; Nav2'ye sabit odom
-# verilir (bkz. navigation.launch.py fake_odom). STM32 baglaninca False yapin
-# (mapping.launch.py'deki static_odom_tf ile birlikte kaldirilacak).
-FAKE_ODOM = True
-
 PATROL_STATUS_FRESH_S = 3.0   # bu kadar eski /patrol_status = patrol.py yok sayilir
+
+# Telefon uygulamasi robotu IP bilmeden bulur: ag yayinina "CRYVEX?" gonderir,
+# robot bu porttan JSON ile cevap verir, uygulama cevabin geldigi adresi kullanir.
+# Boylece modem IP'yi degistirse ya da robot baska bir kafenin agina gecse de
+# kimse adres girmez (2026-09-26: Pi 192.168.1.7 -> .8 oldu, uygulama kopmustu).
+DISCOVERY_PORT = 47474
+DISCOVERY_QUERY = b'CRYVEX?'
+
+# Robot yuzunun renkleri - garson telefondan secer, config/theme.json'da kalici.
+# index.html bu anahtarlari CSS degiskenlerine uygular (applyTheme).
+THEME_DEFAULT = {'eye': '#00d4ff', 'mouth': '#00d4ff', 'light': '#1fa2ff', 'face': '#06060e'}
+THEME_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
 
 # Govdesiz arayuz uclari -> patrol.py komutu (sim tablet_server.py ile AYNI)
 PATROL_SIMPLE_COMMANDS = {
@@ -409,8 +417,7 @@ class LaunchManager:
         with self._lock:
             self._stop_locked()
             self.node.get_logger().info(f'[LaunchManager] Nav2 (AMCL + surus) basliyor: {map_yaml}')
-            cmd = ['ros2', 'launch', 'cryvex_bringup', 'navigation.launch.py',
-                   f'map:={map_yaml}', f'fake_odom:={"true" if FAKE_ODOM else "false"}']
+            cmd = ['ros2', 'launch', 'cryvex_bringup', 'navigation.launch.py', f'map:={map_yaml}']
             self.proc = subprocess.Popen(cmd, start_new_session=True)
             self.kind = 'nav'
 
@@ -443,6 +450,7 @@ class CafeUiServerNode(Node):
         self.mode = 'operating'
         self.screen_on = True
         self.speak_text, self.speak_expr, self.speak_seq = '', '', 0
+        self.theme = self._load_theme()
 
         self.create_subscription(OccupancyGrid, '/map', self._map_cb, MAP_QOS)
         self._scan_msg, self._scan_rx = None, 0.0
@@ -469,6 +477,7 @@ class CafeUiServerNode(Node):
         self._http_thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._http_thread.start()
         threading.Thread(target=self._prewarm_tts, daemon=True).start()
+        threading.Thread(target=self._discovery_loop, args=(port,), daemon=True).start()
         self.get_logger().info(f'Kafe arayuzu hazir: http://0.0.0.0:{port}/')
         # Kayitli harita varsa Nav2'yi (AMCL + surus) hemen baslat; yoksa
         # "Ortami Haritala" beklenir. Masalar tanimli olmasa da baslar - kurulum
@@ -477,6 +486,59 @@ class CafeUiServerNode(Node):
             self.start_nav_and_localize()
         else:
             self.get_logger().warn('Kayitli harita yok - Nav2 baslatilmadi, "Ortami Haritala" bekleniyor.')
+
+    # ---- yuz renkleri (telefondan) ----
+    def _theme_path(self):
+        return os.path.join(self.config_dir, 'theme.json')
+
+    def _load_theme(self):
+        theme = dict(THEME_DEFAULT)
+        try:
+            with open(self._theme_path(), encoding='utf-8') as f:
+                saved = json.load(f)
+            theme.update({k: v for k, v in saved.items()
+                          if k in THEME_DEFAULT and THEME_COLOR_RE.match(str(v))})
+        except (OSError, ValueError):
+            pass
+        return theme
+
+    def update_theme(self, changes):
+        """changes: {'eye'|'mouth'|'light'|'face': '#rrggbb'} ya da {'reset': true}."""
+        if changes.get('reset'):
+            theme = dict(THEME_DEFAULT)
+        else:
+            theme = dict(self.theme)
+            for key, value in changes.items():
+                if key not in THEME_DEFAULT:
+                    raise ValueError(f'bilinmeyen renk: {key}')
+                if not THEME_COLOR_RE.match(str(value)):
+                    raise ValueError(f'gecersiz renk: {value}')
+                theme[key] = str(value).lower()
+        tmp = self._theme_path() + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(theme, f)
+        os.replace(tmp, self._theme_path())
+        self.theme = theme
+        self.get_logger().info(f'Yuz renkleri: {theme}')
+        return theme
+
+    def _discovery_loop(self, http_port):
+        """Uygulamanin "CRYVEX?" yayinina cevap (bkz. DISCOVERY_PORT)."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('', DISCOVERY_PORT))
+        except OSError as e:
+            self.get_logger().error(f'Kesif portu {DISCOVERY_PORT} acilamadi ({e}) - uygulama IP ile baglanmali.')
+            return
+        reply = json.dumps({'cryvex': 'robot', 'port': http_port, 'name': socket.gethostname()}).encode()
+        while True:
+            try:
+                data, addr = sock.recvfrom(256)
+                if data.strip() == DISCOVERY_QUERY:
+                    sock.sendto(reply, addr)
+            except OSError:
+                time.sleep(1.0)
 
     def _prewarm_tts(self):
         # Arayuzun sabit cumleleri internet gelir gelmez kalici onbellege
@@ -840,7 +902,8 @@ class CafeUiServerNode(Node):
         # Ekran: gercek robotta varsayilan ACIK (gozler); patrol is yaparken de acar.
         status['screen_on'] = self.screen_on or bool(status.get('screen_on'))
         age = round(time.monotonic() - self._patrol_rx, 1) if alive else 0.1
-        return {'status': json.dumps(status), 'count': 1, 'age': age, 'patrol': alive}
+        return {'status': json.dumps(status), 'count': 1, 'age': age, 'patrol': alive,
+                'theme': self.theme}
 
     def _make_handler(node_self):
         class Handler(BaseHTTPRequestHandler):
@@ -910,6 +973,8 @@ class CafeUiServerNode(Node):
                 elif path == '/api/volume':
                     vol = get_volume_pct()
                     self._send_json({'volume': vol if vol is not None else -1})
+                elif path == '/api/theme':
+                    self._send_json(node_self.theme)
                 else:
                     self.send_error(404)
 
@@ -1097,8 +1162,16 @@ class CafeUiServerNode(Node):
                     except (TypeError, ValueError):
                         self._send_json({'result': 'error', 'reason': 'bad volume'})
                         return
-                    ok = set_volume_pct(pct)
-                    self._send_json({'result': 'ok' if ok else 'error', 'volume': pct})
+                    vol_ok = set_volume_pct(pct)
+                    self._send_json({'result': 'ok' if vol_ok else 'error', 'volume': pct})
+                elif path == '/api/theme':
+                    # govde: {"eye"|"mouth"|"light"|"face": "#rrggbb", ...} ya da {"reset": true}
+                    try:
+                        theme = node_self.update_theme(d)
+                    except (ValueError, OSError) as e:
+                        error(str(e))
+                        return
+                    ok(theme=theme)
                 elif path == '/api/speak_here':
                     # govde: {"text": "...", "expr": "happy|love|alert|sad" (istege bagli)}
                     # Telefon vb. uzak istemciler icin: robotun KENDI ekrani bir

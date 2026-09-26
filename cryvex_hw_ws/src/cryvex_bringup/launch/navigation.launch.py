@@ -14,11 +14,10 @@ yayinliyor, sim'deki 3D->2D koprusune gerek yok). Kullanim:
 Normalde cafe_ui_server.py'nin LaunchManager'i baslatir (harita varsa acilista,
 "Ortami Haritala" bitince/vazgecilince), elle calistirmaya gerek yok.
 
-GECICI - fake_odom (varsayilan true): STM32/motor henuz bagli degil, EKF
-"odom" TF'ini yayinlamiyor; Nav2/AMCL bu cerceve olmadan hic calismaz.
-mapping.launch.py'deki gibi SABIT odom->base_footprint verilir (robot
-hareket etmiyor sayilir - sadece boru hattini acar). STM32 baglanip EKF
-gercek odom yayinlayinca fake_odom:=false (ikisi ayni TF'i yayinlarsa catisir).
+odom -> base_footprint TF'ini HER ZAMAN EKF yayinlar: STM32 bagliyken gercek
+teker odometrisiyle, bagli degilken stm32_bridge "robot duruyor" (sifir hiz)
+odometrisi yayinlar (motorlar STM32 olmadan zaten donemez). fake_odom:=true
+sadece EKF/koprusuz elle hata ayiklama icin (EKF de calisiyorsa CAKISIR).
 """
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -49,8 +48,8 @@ def generate_launch_description():
 
     fake_odom = LaunchConfiguration('fake_odom')
     declare_fake_odom = DeclareLaunchArgument(
-        'fake_odom', default_value='true',
-        description='GECICI: STM32 yokken sabit odom->base_footprint (bkz. docstring).')
+        'fake_odom', default_value='false',
+        description='Sadece hata ayiklama: EKF yerine sabit odom->base_footprint (bkz. docstring).')
     static_odom_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',

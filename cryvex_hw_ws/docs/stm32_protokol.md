@@ -27,11 +27,25 @@ anlaşılırsa (bozuk satır) basitçe atlanır, sistemi kilitlemez.
 | `V <lx_mm_s> <az_mrad_s>\n` | Hız komutu. `lx_mm_s` = ileri hız (mm/s, işaretli), `az_mrad_s` = dönüş hızı (mrad/s, işaretli). Tam sayı kullanılır (ondalık nokta derdi olmasın). Örnek: `V 250 -300\n` = 0.25 m/s ileri, -0.3 rad/s dönüş. |
 | `PING\n` | Keepalive - watchdog'u besler, hız değiştirmez. Nav2/joystick'ten hız gelmiyorsa (robot duruyor ama bağlı kalmalı) Pi 5 bunu ~200ms'de bir gönderir. |
 | `STOP\n` | Anında dur (yazılımsal). |
+| `INFO\n` | **2026-09-26 eklendi.** Kart `READY ...` satırını tekrar gönderir (sürüm / açılış nedeni / IMU). `stm32_bridge` bağlanınca cevap gelene kadar sorar (başına `\n` koyarak - kartta yarım kalmış satırı temizlemek için). Watchdog'u **beslemez**. |
 
 **Watchdog kuralı**: STM32, `V` veya `PING` komutlarından **200ms** boyunca
 hiçbirini almazsa motorları **kendiliğinden** durdurur (Pi 5 donsa/Wi-Fi
 kopsa/USB kablosu çıksa bile robot durur - bu dokümanın "STM32 watchdog"
 maddesiyle birebir eşleşir). Bu, yazılımın en kritik güvenlik kuralıdır.
+(2026-09-26: ilk gerçek kartta bu kuralın hiç çalışmadığı bulundu - SysTick
+`HAL_IncTick` çağırmıyordu; düzeltildi ve 190 ms'de durduğu ölçüldü.)
+
+**Donanım bekçisi (IWDG, 2026-09-26)**: kartın KENDİ yazılımı takılırsa
+(ana döngü ~0.5 sn dönmezse) kart kendiliğinden yeniden başlar. Şart, çünkü
+STEP darbelerini zamanlayıcı donanımı üretir - işlemci takılsa bile motorlar
+son hızla dönmeye devam ederdi. Yeniden başlayınca `READY ... reset=iwdg`
+gelir, `stm32_bridge` bunu hata olarak loglar. Test edildi: kasıtlı kilitlemede
+0.7 sn'de toparlandı.
+
+**Durum ışığı (Nucleo LD2, yeşil)**: sürekli yanık = acil stop/tampon
+basılı (ya da kablosu kopuk/bağlı değil) · hızlı yanıp sönme = Pi'den komut
+yok · çift yanıp sönme = batarya düşük · saniyede bir kısa = her şey yolunda.
 
 ## Yön 2: STM32 → Pi 5 (durum, ~20 Hz)
 
@@ -56,7 +70,7 @@ ilerledi, batarya 27.4 V).
 
 | Mesaj | Yön | Anlamı |
 |---|---|---|
-| `READY\n` | STM32→Pi5 | STM32 açılışta bir kez gönderir - Pi 5 bağlantının gerçekten kurulduğunu bilir. |
+| `READY fw=<sürüm> reset=<neden> imu=<0\|1>\n` | STM32→Pi5 | Açılışta bir kez ve `INFO`'ya cevap. `reset`: `power` (güç verildi), `pin` (reset düğmesi), `sw` (yazılım/yükleyici), `iwdg` (**takıldı, donanım bekçisi kurtardı**), `wwdg`, `bor` (besleme düştü), `?`. `imu=0` ise `stm32_bridge` `/imu/data_raw` yayınlamaz (takılı olmayan IMU'nun "0" değeri EKF'ye "robot dönmüyor" dedirtmesin). Eski yazılım sadece `READY` gönderir. |
 | `ERR <kod>\n` | STM32→Pi5 | Beklenmeyen durum (örn. `ERR OVERCURRENT`) - loglanır, ekranda gösterilebilir. |
 
 ## Pi 5 tarafı (ROS 2 node, planı)

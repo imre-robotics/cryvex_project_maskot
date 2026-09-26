@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../api/discovery.dart';
 import '../api/robot_api.dart';
 
 /// Uygulama genelinde paylaşılan bağlantı + robot durumu. index.html'deki
@@ -24,6 +25,8 @@ class RobotState extends ChangeNotifier {
   String mode = 'unconfigured';
 
   Timer? _pollTimer;
+  bool searching = false;   // robot agda araniyor (IP degismis olabilir)
+  int _failStreak = 0;
 
   bool get isLive => connected && statusCount > 0 && statusAge >= 0 && statusAge < 4.0;
 
@@ -42,6 +45,25 @@ class RobotState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('robot_ip', ip!);
     notifyListeners();
+  }
+
+  /// Robotu agda bulur (bkz. discovery.dart) ve adresini kaydeder. Modem
+  /// robota yeni IP verdiyse ya da baska bir kafenin agindaysa kullanici
+  /// hicbir sey girmeden baglanti kendiliginden duzelir.
+  Future<bool> findRobot() async {
+    if (searching) return false;
+    searching = true;
+    notifyListeners();
+    try {
+      final found = await discoverRobot();
+      if (found == null) return false;
+      if (found != ip) await setIp(found);
+      _failStreak = 0;
+      return true;
+    } finally {
+      searching = false;
+      notifyListeners();
+    }
   }
 
   void startPolling() {
@@ -78,8 +100,12 @@ class RobotState extends ChangeNotifier {
       final modeData = await api!.mode();
       configured = (modeData['configured'] ?? false) as bool;
       mode = (modeData['mode'] ?? 'unconfigured') as String;
+      _failStreak = 0;
     } catch (_) {
       connected = false;
+      // ~4 sn ust uste cevap yok: robotun IP'si degismis olabilir -> yeniden ara
+      // (bulunamazsa ~12 sn'de bir tekrar; telefonu surekli taramayla yormasin).
+      if (++_failStreak % 10 == 3 && !searching) unawaited(findRobot());
     }
     notifyListeners();
   }

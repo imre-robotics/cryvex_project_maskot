@@ -22,6 +22,7 @@ typedef struct {
 static WheelState s_left;
 static WheelState s_right;
 static uint32_t s_last_tick_ms;
+static int32_t s_ramp_budget; /* rampa izni, 0.001 mm/s biriminde (1 ms'lik 0.3 mm/s kaybolmasin) */
 
 static void wheel_apply(WheelState *w)
 {
@@ -105,14 +106,20 @@ void motor_driver_tick(void)
 {
     uint32_t now = HAL_GetTick();
     uint32_t dt_ms = now - s_last_tick_ms;
+    /* Ana dongu ms'de yuzlerce kez doner: ayni ms icinde zaman gecmedi, yapacak
+     * is yok. (2026-09-26 duzeltmesi: burada dt_ms=1 zorlaniyordu - her cagri
+     * 1 ms sayildi, odometri ~130 kat fazla sayiyor ve 0.3 m/s^2 ivme siniri
+     * fiilen devre disi kaliyordu: robot hedef hiza ANINDA cikiyordu.) */
+    if (dt_ms == 0) return;
     s_last_tick_ms = now;
-    if (dt_ms == 0) dt_ms = 1; /* ayni ms icinde iki cagri - bolme/ilerleme sifir olmasin */
     if (dt_ms > 200) dt_ms = 200; /* uzun bir ara verildiyse (debug/durak) rampayi patlatma */
 
     /* Motor surucu ekibinin analizi: step motor ani ivmede adim kaybeder -
-     * KAYNAK (Nav2/telefon) FARK ETMEKSIZIN burada sinirlanir. */
-    int32_t max_delta = (MAX_ACCEL_MM_S2 * (int32_t)dt_ms) / 1000;
-    if (max_delta < 1) max_delta = 1;
+     * KAYNAK (Nav2/telefon) FARK ETMEKSIZIN burada sinirlanir. 1 ms'de izin
+     * verilen artis 0.3 mm/s (tam sayiya sigmaz) - kusurat biriktirilir. */
+    s_ramp_budget += MAX_ACCEL_MM_S2 * (int32_t)dt_ms;
+    int32_t max_delta = s_ramp_budget / 1000;
+    s_ramp_budget -= max_delta * 1000;
 
     s_left.actual_mm_s = ramp_toward(s_left.actual_mm_s, s_left.target_mm_s, max_delta);
     s_right.actual_mm_s = ramp_toward(s_right.actual_mm_s, s_right.target_mm_s, max_delta);

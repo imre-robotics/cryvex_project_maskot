@@ -8,8 +8,19 @@
 
 #include "stm32f4xx_hal.h"
 
+/* Yazilim surumu: acilista (ve "INFO" komutuna) READY satirinda gonderilir -
+ * Pi tarafi karttaki yazilimi loglardan gorur. Her yuklemede artirin. */
+#define FW_VERSION "1.1.1"
+
 /* ---- Guvenlik zamanlamalari ---- */
 #define WATCHDOG_TIMEOUT_MS      200U   /* Pi5'ten bu suredir komut gelmezse DUR */
+/* DONANIM bekcisi (IWDG): ana dongu bu surede donmezse kart KENDINI yeniden
+ * baslatir. Sart cunku STEP darbelerini zamanlayici donanimi uretir: islemci
+ * takilsa bile motorlar son hizla donmeye devam ederdi (2026-09-26'da kart
+ * I2C beklemesinde takildi - bu bekci olsaydi 0.5 sn'de kurtulurdu).
+ * LSI ~32 kHz / 64 = 500 Hz -> 250 sayim = ~0.5 sn (LSI toleransiyla 0.3-0.9 sn). */
+#define IWDG_PRESCALER_DIV64     4U
+#define IWDG_RELOAD_COUNT        250U
 #define SONAR_TRIGGER_PERIOD_MS  60U    /* 4 sensor sirayla ~15ms'de bir, toplam ~60ms donguyle */
 #define SONAR_ECHO_TIMEOUT_US    30000U /* ~5m karsiligi - bu sureden uzun surerse "menzil disi" say */
 #define STATUS_REPORT_PERIOD_MS  50U    /* Pi5'e "S ..." satiri gonderme sikligi (~20 Hz) */
