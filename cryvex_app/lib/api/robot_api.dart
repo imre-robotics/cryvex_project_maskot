@@ -102,6 +102,14 @@ class RobotApi {
 
   Future<void> setVolume(int pct) => _postJson('/api/volume', {'volume': pct});
 
+  // ---- siparişler (robot ekranından verilir) ----
+  Future<Map<String, dynamic>> orders() => _getJson('/api/orders');
+  /// Barmen: "Hazır – Robot Götürsün" -> robot barmenden alıp siparişin masasına götürür.
+  Future<Map<String, dynamic>> orderReady(int id) => _postJson('/api/order_ready', {'id': id});
+  Future<Map<String, dynamic>> orderCancel(int id) => _postJson('/api/order_cancel', {'id': id});
+  /// Barmende / masada bekleyen robotun kocaman "Devam Et"i.
+  Future<Map<String, dynamic>> continueRobot() => _postJson('/api/continue', {});
+
   // ---- robot yüzünün renkleri: eye / mouth / light (yürüyen ışık) / face ----
   Future<Map<String, String>?> getTheme() async {
     try {

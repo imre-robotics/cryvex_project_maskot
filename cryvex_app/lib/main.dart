@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'notify.dart';
 import 'state/robot_state.dart';
 import 'theme.dart';
 import 'screens/connect_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/panel_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  Notifier.init();   // bildirim izni (Android 13+) - beklemeden uygulama açılır
   runApp(const CryvexApp());
 }
 
@@ -37,6 +41,7 @@ class _Bootstrap extends StatefulWidget {
 
 class _BootstrapState extends State<_Bootstrap> {
   bool _loading = true;
+  bool _panelMode = false;
 
   @override
   void initState() {
@@ -46,6 +51,8 @@ class _BootstrapState extends State<_Bootstrap> {
 
   Future<void> _load() async {
     await context.read<RobotState>().loadSavedIp();
+    // Robotun gövde ekranı olarak ayrılmış tablet: doğrudan Dev Ekran Modunda aç.
+    _panelMode = await isPanelModeSaved();
     if (mounted) setState(() => _loading = false);
   }
 
@@ -54,6 +61,7 @@ class _BootstrapState extends State<_Bootstrap> {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator(color: CryvexColors.cyan)));
     }
+    if (_panelMode) return const PanelScreen();
     final hasIp = context.watch<RobotState>().ip != null;
     return hasIp ? const DashboardScreen() : const ConnectScreen();
   }

@@ -3,3 +3,5 @@ install/
 log/
 .vscode/
 stm32_firmware/Debug/
+__pycache__/
+*.pyc

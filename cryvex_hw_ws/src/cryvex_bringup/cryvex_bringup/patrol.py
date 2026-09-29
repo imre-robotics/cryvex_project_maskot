@@ -151,6 +151,23 @@ STATE_GREET_DOOR = 'greet_door'      # garson "kapida karsila" dedi -> 3 dk kapi
 STATE_DIRECTED = 'directed'          # garson telefondan bir masaya yonlendirdi
 STATE_MESSENGER = 'messenger'        # birinden birine mesaj tasiyor
 STATE_TELEOP = 'teleop'              # operator ekranindan canli joystick suruşu
+# Hazir siparisi masaya goturme (2026-09-26): barmen telefondan "Hazir -
+# Robot Gotursun" der -> barmene git -> YUKLENMESINI bekle -> masaya git ->
+# musterinin ALMASINI bekle -> devriye. Bekleme durumlarinda robot "Devam"
+# (robot ekrani ya da garson telefonu) basilmadan KIPIRDAMAZ.
+STATE_PICKUP = 'pickup'              # hazir siparisi almaya barmene gidiyor
+STATE_PICKUP_WAIT = 'pickup_wait'    # barmende: siparis yukleniyor, "Devam" bekleniyor
+STATE_SERVING = 'serving'            # siparisi masaya goturuyor
+STATE_SERVED_WAIT = 'served_wait'    # masada: musteri aliyor, "Devam" bekleniyor
+ORDER_STATES = (STATE_DELIVERING, STATE_AT_BARISTA, STATE_PICKUP, STATE_PICKUP_WAIT,
+                STATE_SERVING, STATE_SERVED_WAIT)
+# Hazir siparis teslimati SIRAYA alinir ve su durumlardaysa HEMEN baslar (robot
+# yolda/bosta - birakabilecegi bir is). Musteriyle ilgilenirken (masada menu,
+# mesaj, garson yonlendirmesi, joystick) aklinda tutar; o isten cikar cikmaz
+# onceligi teslimat olur. Gercek robotta siparis bilgisi garson telefonuna
+# gider - robot artik siparisi barmene TASIMAZ (STATE_DELIVERING kullanilmaz).
+DELIVERY_INTERRUPTIBLE = (STATE_IDLE, STATE_PATROL, STATE_WANDER, STATE_GOING_HOME, STATE_GREET_DOOR)
+ORDER_THANKS_SECONDS = 3.0   # siparis verildi: tesekkur ekrani gorunsun, sonra masadan ayril
 
 
 class CommandListener(Node):
@@ -183,6 +200,14 @@ class CommandListener(Node):
         self.msg_reply_text = None      # cevap metni (None = cevap yok)
         self.msg_total = 0.0
         self.msg_remaining = 0.0
+        # hazir siparis teslimati (deliver komutu)
+        self.delivery_table = 0         # WAYPOINTS index'i
+        self.delivery_order_id = 0      # cafe_ui_server'daki siparis no (0 = teslimat yok)
+        self.delivery_queue = []        # sirada bekleyen teslimatlar: [(masa_index, siparis_no)]
+        self.delivery_lock = threading.Lock()
+        self.next_wp_index = None       # teslimattan sonra devriye bu masadan devam etsin
+        self.depart_pending = False     # siradaki yola cikmadan once masadan geri cekil
+        self.order_placed = False       # masada siparis verildi -> tesekkur et, ayril
         self.sonar = None              # main()'de SonarReader baglanir
         # operator kurulum ekrani: harita+masalar KAYDEDILENE kadar devriye/goto
         # komutlari reddedilir (yeni haritada anlamsiz eski WAYPOINTS'e gitmesin).
@@ -219,7 +244,7 @@ class CommandListener(Node):
         cmd = msg.data.strip()
 
         # Siparis tasirken (DELIVERING/AT_BARISTA) garson override'lari yok sayilir.
-        busy_with_order = self.state in (STATE_DELIVERING, STATE_AT_BARISTA)
+        busy_with_order = self.state in ORDER_STATES
 
         # Kurulum/haritalama surerken (map_ready=False) devriye/yonlendirme
         # komutlari YOK SAYILIR - operator "Kaydet"e basip yeni noktalari
@@ -265,6 +290,14 @@ class CommandListener(Node):
             self.rescue_az = 0.0
             self.teleop_lx = 0.0
             self.teleop_az = 0.0
+            # yarim kalan ve siradaki teslimatlar iptal: sunucu siparisleri
+            # "Hazirlaniyor"a geri alir, barmen tekrar "Hazir - Robot Gotursun" diyebilir
+            with self.delivery_lock:
+                self.delivery_order_id = 0
+                self.delivery_queue = []
+            self.depart_pending = False
+            self.next_wp_index = None
+            self.order_placed = False
             self.get_logger().info('KOMUT: DURDUR (rescue/teleop dahil hepsi kesildi)')
 
         elif cmd == 'wander':
@@ -290,20 +323,69 @@ class CommandListener(Node):
             self.get_logger().info('KOMUT: Menu kapandi (sayac devam)')
 
         elif cmd.startswith('order:'):
+            # Siparis bilgisi garson telefonuna (cafe_ui_server) gitti - robot
+            # onu barmene TASIMAZ: tesekkur eder, masadan ayrilip devam eder.
             if self.state == STATE_WAITING:
                 self.order_data = cmd[len('order:'):]
                 self.interacting = False
-                self.state = STATE_DELIVERING
-                self.get_logger().info('KOMUT: Siparis alindi -> Barmene gidiliyor')
+                self.order_placed = True
+                self.get_logger().info('KOMUT: Siparis alindi (telefona iletildi) -> masadan ayrilinacak')
             else:
-                self.get_logger().warn(
-                    f'Siparis geldi ama durum uygun degil ({self.state}), yok sayildi.')
+                self.get_logger().info(f'Siparis kaydedildi, robot {self.state} durumunda - bir sey degismez.')
 
         elif cmd == 'resume':
             if self.state == STATE_AT_BARISTA:
                 self.state = STATE_PATROL
                 self.order_data = ''
                 self.get_logger().info('KOMUT: Barmen onayladi -> Devriyeye devam')
+
+        elif cmd.startswith('deliver:'):
+            # deliver:<masa_no>:<siparis_id> - barmen "Hazir - Robot Gotursun" dedi
+            try:
+                _, table_s, order_s = cmd.split(':')
+                idx, order_id = int(table_s) - 1, int(order_s)
+            except ValueError:
+                self.get_logger().warn(f'Gecersiz deliver komutu: {cmd}')
+                return
+            if not 0 <= idx < len(WAYPOINTS):
+                self.get_logger().warn(f'KOMUT: deliver - Masa {idx + 1} tanimli degil.')
+                return
+            with self.delivery_lock:
+                if order_id == self.delivery_order_id or any(o == order_id for _, o in self.delivery_queue):
+                    return   # zaten sirada / yolda
+                self.delivery_queue.append((idx, order_id))
+            self.get_logger().info(
+                f'KOMUT: Siparis #{order_id} hazir -> siraya alindi ({WAYPOINTS[idx]["isim"]}), '
+                f'robot su an: {self.state}')
+            self.maybe_start_delivery()
+
+        elif cmd.startswith('undeliver:'):
+            # sirada bekleyen (henuz alinmamis) teslimat iptal edildi
+            try:
+                order_id = int(cmd.split(':')[1])
+            except (IndexError, ValueError):
+                return
+            with self.delivery_lock:
+                self.delivery_queue = [(i, o) for i, o in self.delivery_queue if o != order_id]
+            self.get_logger().info(f'KOMUT: Siparis #{order_id} teslimat sirasindan cikarildi.')
+
+        elif cmd == 'continue':
+            # Robot ekranindaki / garson telefonundaki kocaman "Devam Et" butonu.
+            if self.state == STATE_AT_BARISTA:
+                self.state = STATE_PATROL
+                self.order_data = ''
+                self.get_logger().info('KOMUT: Devam -> siparis iletildi, devriyeye devam')
+            elif self.state == STATE_PICKUP_WAIT:
+                self.state = STATE_SERVING
+                self.get_logger().info('KOMUT: Devam -> siparis yuklendi, masaya gidiliyor')
+            elif self.state == STATE_SERVED_WAIT:
+                self.next_wp_index = self.delivery_table + 1   # servis edilen masadan sonrakine
+                self.depart_pending = True                      # once masadan 1 m geri cekil
+                self.delivery_order_id = 0
+                self.state = STATE_PATROL if WAYPOINTS else STATE_IDLE
+                self.say('Afiyet olsun!')
+                self.get_logger().info('KOMUT: Devam -> siparis teslim edildi, devriyeye devam')
+                self.maybe_start_delivery()   # siradaki teslimat varsa once o
 
         elif cmd == 'greet_door':
             if not busy_with_order:
@@ -450,6 +532,9 @@ class CommandListener(Node):
                 self.map_ready = False
                 self.interacting = False
                 self.greeting = False
+                with self.delivery_lock:   # yeni haritada eski masalar gecersiz
+                    self.delivery_order_id = 0
+                    self.delivery_queue = []
                 self.state = STATE_IDLE
                 self.get_logger().warn('KOMUT: Haritalama/kurulum BASLADI - devriye kilitlendi.')
 
@@ -459,6 +544,26 @@ class CommandListener(Node):
 
         else:
             self.get_logger().warn(f'Bilinmeyen komut: {cmd}')
+
+    def maybe_start_delivery(self):
+        """Siradaki teslimati, robot birakabilecegi bir isteyse (yolda/bosta)
+        HEMEN baslatir. Musteriyle ilgileniyorsa bir sey yapmaz - o isten
+        cikinca (ana dongu her turda cagirir) teslimat onceliklidir."""
+        with self.delivery_lock:
+            if (self.delivery_order_id or not self.delivery_queue or self.rescue_active
+                    or self.state not in DELIVERY_INTERRUPTIBLE or not self.map_ready):
+                return
+            idx, order_id = self.delivery_queue.pop(0)
+            if not 0 <= idx < len(WAYPOINTS):   # arada kurulum masalari degistirdiyse
+                self.get_logger().warn(f'Teslimat #{order_id}: Masa {idx + 1} artik tanimli degil, atlandi.')
+                return
+            self.delivery_table, self.delivery_order_id = idx, order_id
+            self.interacting = self.greeting = self.cute = False
+            self.screen_on = True
+            prev = self.state
+            self.state = STATE_PICKUP
+        self.get_logger().info(
+            f'TESLIMAT #{order_id}: {prev} birakildi -> barmenden alinip {WAYPOINTS[idx]["isim"]} masasina')
 
     def _missing_target(self, cmd):
         """Komutun gidecegi nokta kurulumda tanimli degilse okunur adini dondurur."""
@@ -525,6 +630,10 @@ class CommandListener(Node):
             'msg_composing': self.msg_composing,
             'map_ready': self.map_ready,
             'rescue_active': self.rescue_active,
+            'delivery_order_id': self.delivery_order_id,
+            'delivery_queue': [o for _, o in self.delivery_queue],
+            'delivery_table': (WAYPOINTS[self.delivery_table]['isim']
+                               if self.delivery_order_id and self.delivery_table < len(WAYPOINTS) else ''),
         }
         msg = String()
         msg.data = json.dumps(status)
@@ -1096,6 +1205,9 @@ def main():
     wander_prev = None
 
     while rclpy.ok():
+        # Sirada hazir siparis varsa ve robot birakabilecegi bir isteyse
+        # (yolda/bosta) once teslimat - musteriden ayrildigi an burada baslar.
+        listener.maybe_start_delivery()
         state = listener.state
 
         # Robot bir is yapiyorsa musteri ekrani otomatik acilsin
@@ -1112,6 +1224,14 @@ def main():
                 listener.get_logger().error('WAYPOINTS bos - devriye bekletiliyor.')
                 listener.state = STATE_IDLE
                 continue
+            if listener.depart_pending:            # siparis teslim edilen masadan ayrilis
+                listener.depart_pending = False
+                _depart_maneuver(listener, STATE_PATROL)
+                if listener.state != STATE_PATROL:
+                    continue
+            if listener.next_wp_index is not None:  # teslimattan sonra sonraki masadan devam
+                wp_index = listener.next_wp_index
+                listener.next_wp_index = None
             wp_index %= len(WAYPOINTS)
             wp = WAYPOINTS[wp_index]
             listener.table_index = wp_index
@@ -1130,12 +1250,28 @@ def main():
             listener.wait_total = TABLE_WAIT_SECONDS
             listener.wait_remaining = TABLE_WAIT_SECONDS
             listener.interacting = False
+            listener.order_placed = False
             interact_elapsed = 0.0
             listener.get_logger().info(
                 f'[{listener.current_waypoint}] Siparis bekleniyor ({TABLE_WAIT_SECONDS:.0f}s)...')
 
             while listener.state == STATE_WAITING:
                 time.sleep(0.5)
+                if listener.order_placed:
+                    # Siparis telefona gitti: tesekkur ekrani gorunsun, sonra ayril.
+                    # (Sirada teslimat varsa ana dongu hemen onu baslatir.)
+                    t = 0.0
+                    while listener.state == STATE_WAITING and t < ORDER_THANKS_SECONDS:
+                        time.sleep(0.25)
+                        t += 0.25
+                    listener.order_placed = False
+                    if listener.state != STATE_WAITING:
+                        break
+                    _depart_maneuver(listener, STATE_WAITING)
+                    if listener.state == STATE_WAITING:
+                        wp_index += 1
+                        listener.state = STATE_PATROL
+                    break
                 if listener.interacting:
                     interact_elapsed += 0.5
                     if interact_elapsed >= INTERACT_TIMEOUT_SECONDS:
@@ -1173,6 +1309,49 @@ def main():
             time.sleep(0.3)
             if listener.state == STATE_PATROL:
                 wp_index += 1
+
+        # ---------------- HAZIR SIPARISI MASAYA GOTUR ----------------
+        elif state == STATE_PICKUP:
+            listener.wait_remaining = 0.0
+            if listener.depart_pending:            # az once siparis teslim edilen masadan ayrilis
+                listener.depart_pending = False
+                _depart_maneuver(listener, STATE_PICKUP)
+                if listener.state != STATE_PICKUP:
+                    continue
+            listener.get_logger().info(f'[TESLIMAT #{listener.delivery_order_id}] Barmene gidiliyor...')
+            if not drive(navigator, listener, BARISTA_POS, STATE_PICKUP):
+                if listener.state != STATE_PICKUP:
+                    continue
+                listener.get_logger().warn('[TESLIMAT] Barmene ulasilamadi, yine de yukleme bekleniyor.')
+            if listener.state != STATE_PICKUP:
+                continue
+            listener.current_waypoint = BARISTA_POS.get('isim', 'Barmen')
+            listener.state = STATE_PICKUP_WAIT
+            table = WAYPOINTS[listener.delivery_table]['isim']
+            listener.say(f'{table} siparişini alabilirim. Yerleştirince Devam\'a basın.')
+
+        elif state == STATE_SERVING:
+            idx = listener.delivery_table
+            if not 0 <= idx < len(WAYPOINTS):   # arada kurulum masalari degistirdiyse
+                listener.get_logger().error(f'[TESLIMAT] Masa {idx + 1} artik tanimli degil - teslimat iptal.')
+                listener.delivery_order_id = 0
+                listener.state = STATE_IDLE
+                continue
+            wp = WAYPOINTS[idx]
+            listener.table_index = idx
+            listener.get_logger().info(f'[TESLIMAT #{listener.delivery_order_id}] {wp["isim"]} masasina gidiliyor...')
+            if not drive(navigator, listener, wp, STATE_SERVING) and listener.state == STATE_SERVING:
+                listener.get_logger().warn(f'[TESLIMAT] {wp["isim"]} masasina ulasilamadi, yine de burada bekleniyor.')
+            if listener.state != STATE_SERVING:
+                continue
+            listener.current_waypoint = wp['isim']
+            listener.state = STATE_SERVED_WAIT
+            listener.say(f'{wp["isim"]}, siparişiniz geldi! Afiyet olsun. Aldıktan sonra Devam\'a basın.')
+
+        elif state in (STATE_PICKUP_WAIT, STATE_SERVED_WAIT):
+            # Bilerek ZAMAN ASIMI YOK: robot ekrani ya da garson telefonundan
+            # "Devam" gelmeden kipirdamaz ('continue' komutu).
+            time.sleep(0.3)
 
         # ---------------- WANDER & GREET ----------------
         elif state == STATE_WANDER:

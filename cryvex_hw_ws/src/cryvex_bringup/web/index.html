@@ -164,6 +164,43 @@
         .frame-light .glow { stroke-width: 12;  opacity: 0.25; }
         .frame-light .head { stroke-width: 4;   stroke: color-mix(in srgb, var(--light-color) 30%, white); }
 
+        /* ---------- EKRAN ROLLERI (bkz. <body> basindaki script) ---------- */
+        /* Kafadaki ekran = GARSON: yuz + koseda ayarlar (devriye, haritalama, ses...)
+         * + barmende siparis yukleme penceresi. Musteri parcalari (menu, siparis,
+         * mesaj) dev ekranda. */
+        body.role-eyes .bottom-bar, body.role-eyes .build-tag, body.role-eyes #btn-open-msg,
+        body.role-eyes #overlay-order, body.role-eyes #overlay-compose, body.role-eyes .order-prompt,
+        body.role-eyes .msg-view, body.role-eyes .confirm-flash { display: none !important; }
+        /* Dev ekran = MUSTERI: yuz yok, bostayken kocaman CRYVEX; masada menu/siparis/mesaj,
+         * masada "Aldim". Hicbir yonetim dugmesi yok (ayarlar kafada ve garson telefonunda). */
+        body.role-panel .eyes-wrapper, body.role-panel .mouth-wrapper,
+        body.role-panel .corner-btns, body.role-panel .bottom-bar, body.role-panel .build-tag,
+        body.role-panel #overlay-manager, body.role-panel #overlay-mapping,
+        body.role-panel #overlay-pass { display: none !important; }
+        /* Musteri ekrani hep SIMSIYAH (telefondan secilen "yuz" rengi kafadaki ekran icin) */
+        body.role-panel { --bg: #000000; }
+        body.role-panel .ambient-orb { display: none; }
+        .panel-brand { display: none; }
+        body.role-panel .panel-brand {
+            display: flex; flex-direction: column; align-items: center; gap: 1.2vh;
+            position: relative; z-index: 2; user-select: none; margin-top: -6vh;
+        }
+        .brand-word {
+            font-size: clamp(72px, 17vw, 300px); font-weight: 900; letter-spacing: 0.08em; line-height: 1;
+            /* SADECE goz rengi (telefondan secilen): gecen parilti da gozun acik tonu */
+            background: linear-gradient(100deg, var(--eye-color) 0%, var(--eye-color) 35%,
+                color-mix(in srgb, var(--eye-color) 55%, white) 50%, var(--eye-color) 65%, var(--eye-color) 100%);
+            background-size: 200% 100%;
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            filter: drop-shadow(0 0 28px color-mix(in srgb, var(--eye-color) 45%, transparent));
+            animation: brand-shine 6s linear infinite, brand-breathe 4.5s ease-in-out infinite;
+        }
+        @keyframes brand-shine { from { background-position: 0% 0; } to { background-position: 200% 0; } }
+        @keyframes brand-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+        .brand-sub { font-size: clamp(16px, 2.6vw, 34px); color: var(--text-muted); letter-spacing: 0.3em; }
+        .panel-brand.poked .brand-word { animation: brand-shine 6s linear infinite, brand-poke 0.5s ease 1; }
+        @keyframes brand-poke { 30% { transform: scale(1.08); } 60% { transform: scale(0.97); } }
+
         /* ---------- EYES ---------- */
         .eyes-wrapper {
             display: flex; align-items: center; justify-content: space-between;
@@ -728,6 +765,16 @@
             margin-bottom: 16px;
         }
         .barista-wait .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-amber); box-shadow: 0 0 8px var(--accent-amber); animation: dot-pulse 1.2s ease-in-out infinite; }
+        /* Barmende/masada bekleyen robotun KOCAMAN "Devam Et" butonu */
+        .btn-continue {
+            width: 100%; min-height: 96px; padding: 24px 18px;
+            font-size: clamp(1.3rem, 3.6vw, 1.8rem); font-weight: 800; letter-spacing: 0.02em;
+            animation: continue-glow 1.6s ease-in-out infinite;
+        }
+        @keyframes continue-glow {
+            0%, 100% { box-shadow: 0 0 0 rgba(0, 229, 255, 0); }
+            50%      { box-shadow: 0 0 28px rgba(0, 229, 255, 0.55); }
+        }
 
         /* ==================== TRANSITION / TOAST ==================== */
         .screen-transition {
@@ -737,7 +784,7 @@
         .screen-transition.active { opacity: 1; pointer-events: all; }
         .toast {
             position: absolute; top: 4vh; left: 50%;
-            transform: translateX(-50%) translateY(-160%);
+            transform: translateX(-50%) translateY(calc(-100% - 4vh - 40px));   /* gölgesi dahil tamamen ekran dışı */
             padding: 11px 26px; border-radius: 14px; background: var(--bg-surface);
             border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(16px);
             font-size: clamp(0.82rem, 1.9vw, 0.98rem); font-weight: 500; color: var(--text-primary);
@@ -771,6 +818,17 @@
     </style>
 </head>
 <body>
+    <script>
+        // EKRAN ROLU (2026-09-26 - govdeye dev dokunmatik ekran eklendi):
+        //   /eyes  = robotun kafasindaki kucuk ekran: SADECE yuz (goz/agiz/isik,
+        //            dokunma tepkileri) - robotun sesi de buradan calar.
+        //   /panel = govdedeki dev ekran: menu, siparis, mesaj, "Devam Et",
+        //            ayarlar/haritalama; bostayken kocaman CRYVEX. Ses CALMAZ,
+        //            konusmayi sunucu uzerinden /eyes'a iletir.
+        //   /      = ikisi bir arada (simulasyon ve tek ekranli eski duzen).
+        document.body.classList.add('role-' + (location.pathname.startsWith('/panel') ? 'panel'
+            : location.pathname.startsWith('/eyes') ? 'eyes' : 'full'));
+    </script>
 
     <div class="screen-transition" id="screen-transition"></div>
     <div class="toast" id="toast"></div>
@@ -863,6 +921,11 @@
                 <span class="status-text" id="status-text">Hazır</span>
             </div>
         </div>
+        <!-- Dev ekranin bos zaman gorunumu (sadece /panel) -->
+        <div class="panel-brand" id="panel-brand">
+            <div class="brand-word">CRYVEX</div>
+            <div class="brand-sub">☕ KAFE ASİSTANI</div>
+        </div>
         <div class="build-tag">arayüz 2026-09-11j</div>
 
         <div class="corner-btns">
@@ -906,7 +969,7 @@
                 <button class="btn btn-amber" id="btn-open-rescue"><span class="btn-icon">🆘</span> Kurtar (Manuel Sürüş)</button>
                 <button class="btn btn-cyan" id="btn-open-control"><span class="btn-icon">🕹️</span> Kontrol Sende</button>
                 <button class="btn btn-cyan" id="btn-open-mapping"><span class="btn-icon">🗺️</span> Ortamı Haritala</button>
-                <a class="btn btn-gray" href="/setup" style="text-decoration:none; box-sizing:border-box;"><span class="btn-icon">📍</span> Kurulum Ekranı (Masa/Kapı Noktaları)</a>
+                <a class="btn btn-gray setup-link" href="/setup" style="text-decoration:none; box-sizing:border-box;"><span class="btn-icon">📍</span> Kurulum Ekranı (Masa/Kapı Noktaları)</a>
                 <button class="btn btn-gray close-manager"><span class="btn-icon">✕</span> Kapat</button>
             </div>
         </div>
@@ -1019,11 +1082,11 @@
         <div class="backdrop"></div>
         <div class="panel-bottom">
             <div class="panel-handle"></div>
-            <h2 class="panel-title">🔔 Yeni Sipariş</h2>
-            <p class="panel-sub">Robot teslimat noktasında bekliyor</p>
+            <h2 class="panel-title" id="wait-title">🔔 Yeni Sipariş</h2>
+            <p class="panel-sub" id="wait-sub">Robot teslimat noktasında bekliyor</p>
             <div class="receipt" id="receipt"></div>
-            <div class="barista-wait"><span class="dot"></span> Onay verilene kadar robot buradan ayrılmayacak</div>
-            <button class="btn btn-primary" id="btn-resume-patrol" style="padding: 20px; font-size: 1.15rem;">
+            <div class="barista-wait"><span class="dot"></span> Devam'a basılana kadar robot buradan ayrılmayacak</div>
+            <button class="btn btn-primary btn-continue" id="btn-resume-patrol">
                 👍 Siparişi Aldım · Devriyeye Devam Et
             </button>
         </div>
@@ -1149,16 +1212,25 @@
         // arayüzde butonla gelen konuşma robota iletilir; durumdan kendiliğinden doğan
         // konuşma (robotSays) orada sessiz kalır, yoksa açık her cihaz robotu tekrar konuşturur.
         const ON_ROBOT = ['localhost', '127.0.0.1'].includes(location.hostname);
+        const ROLE = document.body.classList.contains('role-panel') ? 'panel'
+                   : document.body.classList.contains('role-eyes') ? 'eyes' : 'full';
+        // Robotun sesini SADECE robotun yuz ekrani calar. Dev ekran (tablet ya da
+        // Pi'nin ikinci ekrani) konusmayi sunucu uzerinden yuz ekranina iletir -
+        // yoksa iki ekran ayni cumleyi ust uste okurdu.
+        const PLAYS_AUDIO = ON_ROBOT && ROLE !== 'panel';
+        // Kurulum sayfasi "Devriye Ekrani"na donerken ayni role (/eyes ya da /) donsun
+        function setupUrl() { return '/setup?from=' + encodeURIComponent(location.pathname); }
+        document.querySelectorAll('.setup-link').forEach(a => { a.href = setupUrl(); });
         function speak(text) {
             if (!text) return;
-            if (!ON_ROBOT) {
+            if (!PLAYS_AUDIO) {
                 apiCall('/api/speak_here', JSON.stringify({ text, expr: currentExprType }));
                 return;
             }
             playServerTts(text).catch(() => speakBrowser(text));
         }
         function robotSays(text) {
-            if (ON_ROBOT) speak(text);
+            if (PLAYS_AUDIO) speak(text);
         }
         function playServerTts(text) {
             return new Promise((resolve, reject) => {
@@ -1292,7 +1364,7 @@
             if (HEX.test(t.eye || '')) css.setProperty('--eye-color', t.eye);
             if (HEX.test(t.mouth || '')) css.setProperty('--mouth-color', t.mouth);
             if (HEX.test(t.light || '')) css.setProperty('--light-color', t.light);
-            if (HEX.test(t.face || '')) css.setProperty('--bg', t.face);
+            if (HEX.test(t.face || '') && ROLE !== 'panel') css.setProperty('--bg', t.face);   // musteri ekrani hep siyah
             // yeni rengini begendi: sirit + goz kirp (sayfa ilk acilisinda degil)
             if (!firstLoad && currentScreen === 'main') { setExpression('happy', 1300); winkEye(eyeRight); }
         }
@@ -1491,7 +1563,13 @@
         window.addEventListener('resize', buildFrameLights);
 
         // ==================== OVERLAYS ====================
+        // Hangi pencere hangi ekranda (bkz. CSS "EKRAN ROLLERI"): musteri pencereleri
+        // dev ekranda, garson pencereleri kafadaki ekranda; tek ekranda ('full') hepsi.
+        const CUSTOMER_OVERLAYS = ['overlay-order', 'overlay-compose'];
+        const STAFF_OVERLAYS = ['overlay-manager', 'overlay-mapping', 'overlay-pass'];
         function openOverlay(el) {
+            if (ROLE === 'eyes' && CUSTOMER_OVERLAYS.includes(el.id)) return;
+            if (ROLE === 'panel' && STAFF_OVERLAYS.includes(el.id)) return;
             if (overlayOpen && overlayOpen !== el) {
                 overlayOpen.classList.remove('active');
                 if (overlayOpen.id === 'overlay-mapping') leaveMappingView();
@@ -1827,7 +1905,7 @@
                 speak('Harita kaydedildi.');
             }
             closeOverlay();
-            setTimeout(() => { window.location.href = '/setup'; }, 1400);
+            setTimeout(() => { window.location.href = setupUrl(); }, 1400);
         });
 
         // ---- sanal joystick (pointer events - dokunmatik + mouse) ----
@@ -2103,13 +2181,29 @@
 
         // Yarımların dışına / merkez halkaya dokunulursa varsayılan: menü
         screenMain.addEventListener('click', (e) => {
+            if (ROLE === 'eyes') {   // kafadaki (garson) ekrani: menu/mesaj yok, yuze dokunus = tepki
+                if (!overlayOpen) onFaceTouch(0);
+                return;
+            }
             if (overlayOpen) return;
             if (msgPhase === 'pending') { apiCall('/api/msg_open'); return; }
             if (currentStatus === 'waiting_at_table') { openTableMenu(); return; }
             // Butonlar/kartlar kendi isini yapar; bos yuze dokunus = yuz tepkisi
             if (e.target.closest('button, a, input, .corner-btn')) return;
+            if (ROLE === 'panel') { panelPoke(); return; }
             onFaceTouch(0);
         });
+        // Dev ekrandaki CRYVEX'e dokunulunca: yazi ziplar, robotun yuzu (kucuk
+        // ekran) gulumseyip selam verir - konusma sunucu uzerinden yuz ekranina.
+        let lastPanelPoke = 0;
+        function panelPoke() {
+            const brand = $('panel-brand');
+            brand.classList.remove('poked'); void brand.offsetWidth; brand.classList.add('poked');
+            if (Date.now() - lastPanelPoke < 2500) return;   // ust uste dokunusta her seferinde konusmasin
+            lastPanelPoke = Date.now();
+            currentExprType = rnd(['happy', 'love']);
+            speak(rnd(POKE_PHRASES));
+        }
         $('btn-msg-reply').addEventListener('click', () => openCompose({ reply: { from: lastMsg.to, to: lastMsg.from } }));
         msgView.addEventListener('click', (e) => {
             if (e.target.closest('#btn-msg-reply')) return;
@@ -2192,17 +2286,56 @@
                 <div class="receipt-total"><span>Toplam</span><span class="amount">${data.total || ''} ₺</span></div>`;
         }
 
-        $('btn-resume-patrol').addEventListener('click', () => {
-            apiCall('/api/resume_patrol');
+        // Robotun "Devam" bekledigi 3 durum (patrol.py): barmene siparis iletildi,
+        // barmende hazir siparis yukleniyor, masada musteri siparisini aliyor.
+        // Garson telefonundaki "Devam Et" de ayni /api/continue'yu cagirir.
+        const WAIT_VIEWS = {
+            at_barista:  { title: () => '🔔 Yeni Sipariş', sub: 'Siparişi hazırlamaya başlayın',
+                           btn: '👍 Siparişi Aldım · Devriyeye Devam Et', order: i => i.order,
+                           done: 'Devriyeye devam ediliyor' },
+            pickup_wait: { title: t => `📦 ${t} Teslimatı`, sub: 'Hazır siparişi robota yerleştirin',
+                           btn: '✅ Yüklendi · Masaya Götür', order: i => i.delivery_order,
+                           done: 'Masaya gidiliyor' },
+            served_wait: { title: () => '🍽️ Siparişiniz Geldi!', sub: 'Afiyet olsun! Lütfen siparişinizi alın',
+                           btn: '👍 Aldım · Devriyeye Devam Et', order: i => i.delivery_order,
+                           done: 'Afiyet olsun!' },
+        };
+        let waitViewDone = '';
+        function showWaitView(info) {
+            // Masada "Aldim" musterinin isi -> dev ekran; barmende yukleme / siparis
+            // iletme garsonun isi -> kafadaki ekran. (Garson telefonunda ikisi de var.)
+            const customerStep = info.state === 'served_wait';
+            if ((ROLE === 'eyes' && customerStep) || (ROLE === 'panel' && !customerStep)) return;
+            const v = WAIT_VIEWS[info.state];
+            const order = v.order(info) || '';
+            let table = info.delivery_table || 'Masa';
+            try { table = JSON.parse(order).table || table; } catch (e) { /* eski format */ }
+            $('wait-title').textContent = v.title(table);
+            $('wait-sub').textContent = v.sub;
+            $('btn-resume-patrol').textContent = v.btn;
+            waitViewDone = v.done;
+            renderReceipt(order);
+            openOverlay(overlayBarista);
+        }
+        $('btn-resume-patrol').addEventListener('click', async () => {
+            let res = await apiCall('/api/continue');
+            if (!res) res = await apiCall('/api/resume_patrol');   // sim (tablet_server) bu ucu bilmez
+            if (res && res.result === 'error') { showToast('⚠ ' + res.reason); return; }
             closeOverlay();
-            showToast('Devriyeye devam ediliyor');
-            speak('Devriyeye devam ediyorum.');
+            showToast(waitViewDone || 'Devam ediliyor');
         });
 
         // ==================== COUNTDOWN RING ====================
+        let lookingDown = false;
         function updateRing(info) {
             const waiting = info.state === 'waiting_at_table' && !info.interacting && !overlayOpen;
             // Bekleme modunda gözler kaybolur, "menü için dokunun" ekranı gelir.
+            // Yuz ekraninda (menu dev ekranda) gozler yerinde kalir, asagi - dev ekrana - bakar.
+            if (ROLE === 'eyes') {
+                if (waiting && !lookingDown) moveEyes(0, 12);
+                lookingDown = waiting;
+                return;
+            }
             eyesWrapper.classList.toggle('gone', waiting);
             if (!waiting) { orderPrompt.classList.remove('show'); return; }
 
@@ -2225,6 +2358,10 @@
                 case 'waiting_at_table':  return ['active',  `${wp || 'Masa'} · siparişiniz bekleniyor`];
                 case 'delivering_order':  return ['warning', 'Sipariş barmene götürülüyor'];
                 case 'at_barista':        return ['warning', 'Barmende · onay bekleniyor'];
+                case 'pickup':            return ['warning', 'Hazır siparişi almaya gidiyor'];
+                case 'pickup_wait':       return ['warning', 'Barmende · sipariş yükleniyor'];
+                case 'serving':           return ['active',  `Sipariş ${wp || 'masaya'} götürülüyor`];
+                case 'served_wait':       return ['active',  `${wp || 'Masa'} · sipariş teslim ediliyor`];
                 case 'going_home':        return ['warning', 'Üsse dönülüyor'];
                 case 'wander':            return ['active',  'Sosyalleşiyor · misafir karşılıyor'];
                 case 'greet_door':        return ['active',  'Kapıda misafir karşılıyor'];
@@ -2299,13 +2436,17 @@
                         setExpression('sad', 2200);
                         robotSays('Başka sefere görüşmek üzere.');
                     }
-                    if (info.state === 'at_barista') {
-                        renderReceipt(info.order);
-                        openOverlay(overlayBarista);
-                        setExpression('alert');
-                        robotSays('Barmen, yeni siparişiniz hazır. Onaylayınca devam edeceğim.');
-                    } else if (currentStatus === 'at_barista' && overlayOpen === overlayBarista) {
-                        closeOverlay();
+                    if (WAIT_VIEWS[info.state]) {
+                        showWaitView(info);
+                        if (info.state === 'at_barista') {
+                            setExpression('alert');
+                            robotSays('Barmen, yeni siparişiniz hazır. Onaylayınca devam edeceğim.');
+                        } else {
+                            // teslimat cumlesini patrol.py soyler (masa adiyla)
+                            setExpression(info.state === 'served_wait' ? 'love' : 'happy');
+                        }
+                    } else if (WAIT_VIEWS[currentStatus] && overlayOpen === overlayBarista) {
+                        closeOverlay();   // telefondan "Devam" basildi ya da gorev bitti
                         setExpression('');
                     }
                     currentStatus = info.state;

@@ -53,8 +53,8 @@ from rclpy.time import Time as RclpyTime
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import LaserScan
-from std_msgs.msg import String
+from sensor_msgs.msg import BatteryState, LaserScan
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformListener
 
@@ -73,6 +73,24 @@ MAP_QOS = QoSProfile(
 MAP_BACKUP_KEEP = 10  # "Bitir" oncesi yedeklenen eski haritalardan kac tanesi tutulsun
 
 PATROL_STATUS_FRESH_S = 3.0   # bu kadar eski /patrol_status = patrol.py yok sayilir
+
+# Siparisler (masada robot ekranindan verilir, garson telefonunda listelenir;
+# barmen "Hazir - Robot Gotursun" deyince patrol.py'ye 'deliver' gider).
+# config/orders.json'da kalici - sunucu yeniden baslasa da liste kaybolmaz.
+ORDERS_KEEP = 60                    # dosyada tutulan en fazla siparis
+ORDER_REVERT_GRACE_S = 4.0          # patrol teslimati bu sure icinde ustlenmezse geri al
+DELIVERY_STATES = ('pickup', 'pickup_wait', 'serving', 'served_wait')
+# preparing -> (barmen "Hazir") ready = robotun sirasinda -> delivering = robot aldi -> delivered
+ACTIVE_ORDER_STATUSES = ('preparing', 'ready', 'delivering')
+# patrol.py DELIVERY_INTERRUPTIBLE ile ayni: robot bu durumlardaysa teslimata hemen cikar
+PATROL_INTERRUPTIBLE = ('idle', 'patrol', 'wander', 'going_home', 'greet_door')
+
+# Robot Sagligi esikleri
+BATTERY_LOW_V = 22.0              # stm32_bridge BATT_LOW_MV ile ayni (24 V LiFePO4)
+LOCALIZATION_MAX_STD_M = 0.5      # AMCL belirsizligi bundan buyukse "emin degil"
+LOCALIZATION_MAX_STD_DEG = 30.0
+HEALTH_NAMES = {'brain': 'beyin', 'stm32': 'STM32', 'lidar': 'LiDAR', 'estop': 'acil stop',
+                'bumper': 'tampon', 'battery': 'batarya', 'localization': 'konum'}
 
 # Telefon uygulamasi robotu IP bilmeden bulur: ag yayinina "CRYVEX?" gonderir,
 # robot bu porttan JSON ile cevap verir, uygulama cevabin geldigi adresi kullanir.
@@ -451,6 +469,9 @@ class CafeUiServerNode(Node):
         self.screen_on = True
         self.speak_text, self.speak_expr, self.speak_seq = '', '', 0
         self.theme = self._load_theme()
+        self._orders_lock = threading.Lock()
+        self.orders = self._load_orders()
+        self.orders_seq = 1   # her degisiklikte artar - telefon listeyi o zaman yeniden ceker
 
         self.create_subscription(OccupancyGrid, '/map', self._map_cb, MAP_QOS)
         self._scan_msg, self._scan_rx = None, 0.0
@@ -472,6 +493,19 @@ class CafeUiServerNode(Node):
         self._last_pose_saved = (None, 0.0)   # ((x, y, yaw), zaman)
         self._amcl_rx_t = 0.0                 # son /amcl_pose (monotonic)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self._amcl_pose_cb, MAP_QOS)
+
+        # "Robot Sagligi" (telefon ana paneli): STM32'nin her durum satiriyla
+        # (20 Hz) gelen acil stop / tampon / batarya + kart bilgisi + konum guveni.
+        self._hw = {'estop': None, 'bumper': None, 'battery_v': None, 'rx': 0.0, 'info': None}
+        self._amcl_std = None          # (x m, y m, yaw derece) - son AMCL belirsizligi
+        self._nav_started_t = 0.0
+        self.create_subscription(Bool, '/estop_state', lambda m: self._hw_rx('estop', m.data), 10)
+        self.create_subscription(Bool, '/bumper_state', lambda m: self._hw_rx('bumper', m.data), 10)
+        self.create_subscription(BatteryState, '/battery_state',
+                                 lambda m: self._hw_rx('battery_v', float(m.voltage)), 10)
+        self.create_subscription(
+            String, '/stm32_info', self._stm32_info_cb,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
         self._httpd = ThreadingHTTPServer(('0.0.0.0', port), self._make_handler())
         self._http_thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -609,7 +643,9 @@ class CafeUiServerNode(Node):
 
     def _refine_pose(self):
         time.sleep(0.5)  # AMCL once /initialpose'u islesin
-        for _ in range(15):  # lidar 7 Hz: her istek bir sonraki taramada islenir
+        # lidar 7 Hz: her istek bir sonraki taramada islenir. 15 guncelleme
+        # ±0.5 m ipucunu ±0.7 m'de birakabiliyordu (2026-09-26), 30 ~±0.3 m.
+        for _ in range(30):
             if self.nomotion_cli.service_is_ready():
                 self.nomotion_cli.call_async(Empty.Request())
             time.sleep(0.3)
@@ -631,6 +667,8 @@ class CafeUiServerNode(Node):
 
     def _amcl_pose_cb(self, msg):
         self._amcl_rx_t = time.monotonic()
+        c = msg.pose.covariance
+        self._amcl_std = (math.sqrt(abs(c[0])), math.sqrt(abs(c[7])), math.degrees(math.sqrt(abs(c[35]))))
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         (prev, prev_t) = self._last_pose_saved
@@ -665,6 +703,7 @@ class CafeUiServerNode(Node):
         son kaydedilen konum. Ikisi de yoksa "Robot Burada" ile elle verilir -
         Nav2'nin surus kismi konum gelene kadar beklemede kalir."""
         self.launch_mgr.start_nav(self.active_map_yaml_path())
+        self._nav_started_t = time.monotonic()
         pose = pose or self.load_last_pose()
         if pose is None:
             self.get_logger().warn('Bilinen robot konumu yok - kurulum ekranindan "Robot Burada" ile verin.')
@@ -711,6 +750,197 @@ class CafeUiServerNode(Node):
             raise RuntimeError('barmen noktasi tanimli degil')
         self.set_robot_pose(float(b['x']), float(b['y']), float(b.get('yaw', 0.0)))
 
+    # ---- Siparisler ----
+    def _orders_path(self):
+        return os.path.join(self.config_dir, 'orders.json')
+
+    def _load_orders(self):
+        try:
+            with open(self._orders_path(), encoding='utf-8') as f:
+                orders = json.load(f)
+            return orders if isinstance(orders, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def _save_orders_locked(self):
+        self.orders = self.orders[-ORDERS_KEEP:]
+        self.orders_seq += 1
+        tmp = self._orders_path() + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(self.orders, f, ensure_ascii=False)
+            os.replace(tmp, self._orders_path())
+        except OSError as e:
+            self.get_logger().warn(f'orders.json yazilamadi: {e}')
+
+    def _find_order_locked(self, order_id):
+        return next((o for o in self.orders if o['id'] == order_id), None)
+
+    def add_order(self, raw):
+        """Robot ekranindan gelen siparis: {"items": [{name, qty, price}], "table", "total"}."""
+        try:
+            data = json.loads(raw or '{}')
+            items = [{'name': str(i['name']), 'qty': int(i['qty']), 'price': float(i.get('price', 0))}
+                     for i in data.get('items') or []]
+        except (ValueError, TypeError, KeyError):
+            items, data = [], {}
+        if not items:
+            return None
+        with self._orders_lock:
+            order = {'id': max((o['id'] for o in self.orders), default=0) + 1,
+                     'table': str(data.get('table') or 'Masa'), 'items': items,
+                     'total': data.get('total') or sum(i['qty'] * i['price'] for i in items),
+                     'created': time.time(), 'updated': time.time(), 'status': 'preparing'}
+            self.orders.append(order)
+            self._save_orders_locked()
+        self.get_logger().info(f"Yeni siparis #{order['id']}: {order['table']} - "
+                               + ', '.join(f"{i['qty']}x {i['name']}" for i in items))
+        return order
+
+    def order_ready(self, order_id):
+        """Barmen "Hazir - Robot Gotursun": ASLA "mesgul" diye reddedilmez -
+        robot siraya alir. Yolda/bostaysa hemen gelir; musteriyle ilgileniyor
+        ya da baska teslimattaysa o isi biter bitmez gelir (patrol.py).
+        Donus: (siparis, robot hemen mi geliyor)."""
+        if not self.patrol_alive():
+            raise RuntimeError('devriye beyni (patrol.py) çalışmıyor')
+        tables = [t.get('isim') for t in (self.load_waypoints_cfg().get('tables') or [])]
+        with self._orders_lock:
+            order = self._find_order_locked(order_id)
+            if order is None or order['status'] != 'preparing':
+                raise RuntimeError('sipariş bulunamadı ya da zaten sırada/yolda/teslim edildi')
+            if order['table'] not in tables:
+                raise RuntimeError(f"{order['table']} kurulumda tanımlı değil")
+            order['status'], order['updated'] = 'ready', time.time()
+            self._save_orders_locked()
+        status = self._patrol_status or {}
+        now = (status.get('state') in PATROL_INTERRUPTIBLE and not status.get('delivery_order_id')
+               and not status.get('delivery_queue'))
+        self.publish_patrol(f"deliver:{tables.index(order['table']) + 1}:{order_id}")
+        return order, now
+
+    def order_cancel(self, order_id):
+        with self._orders_lock:
+            order = self._find_order_locked(order_id)
+            if order is None or order['status'] not in ('preparing', 'ready'):
+                raise RuntimeError('robot bu siparişi aldı; iptal için önce robotu durdurun')
+            was_queued = order['status'] == 'ready'
+            order['status'], order['updated'] = 'cancelled', time.time()
+            self._save_orders_locked()
+        if was_queued:
+            self.publish_patrol(f'undeliver:{order_id}')   # robotun teslimat sirasindan cikar
+
+    def robot_continue(self):
+        """Kocaman "Devam Et": barmende/masada bekleyen robot yola devam eder."""
+        state = (self._patrol_status or {}).get('state', '')
+        if state not in ('at_barista', 'pickup_wait', 'served_wait'):
+            raise RuntimeError('robot şu an bir onay beklemiyor')
+        if state == 'served_wait':   # musteri aldi -> teslim edildi
+            order_id = (self._patrol_status or {}).get('delivery_order_id')
+            with self._orders_lock:
+                order = self._find_order_locked(order_id)
+                if order is not None and order['status'] == 'delivering':
+                    order['status'], order['updated'] = 'delivered', time.time()
+                    self._save_orders_locked()
+        self.publish_patrol('continue')
+
+    def _check_delivery(self, status):
+        # Siparis durumunu patrol.py'nin GERCEK teslimat durumuyla esle:
+        # robotun elindeki -> 'delivering', sirasindaki -> 'ready'. Ikisinde de
+        # yoksa (Durdur, haritalama, cokme...) "hazirlaniyor"a geri al ki barmen
+        # tekrar gonderebilsin (komut yeni gonderildiyse kisa bir sure bekle).
+        current = status.get('delivery_order_id')
+        queue = status.get('delivery_queue') or []
+        with self._orders_lock:
+            changed = False
+            for order in self.orders:
+                if order['status'] not in ('ready', 'delivering'):
+                    continue
+                if order['id'] == current:
+                    new = 'delivering'
+                elif order['id'] in queue:
+                    new = 'ready'
+                elif time.time() - order['updated'] > ORDER_REVERT_GRACE_S:
+                    new = 'preparing'
+                    self.get_logger().warn(f"Siparis #{order['id']} teslimati yarida kaldi -> tekrar 'hazirlaniyor'.")
+                else:
+                    continue
+                if new != order['status']:
+                    order['status'], order['updated'] = new, time.time()
+                    changed = True
+            if changed:
+                self._save_orders_locked()
+
+    def orders_view(self):
+        with self._orders_lock:
+            active = [o for o in self.orders if o['status'] in ACTIVE_ORDER_STATUSES]
+            done = [o for o in self.orders if o['status'] in ('delivered', 'cancelled')][-10:]
+            return {'seq': self.orders_seq, 'now': time.time(),
+                    'orders': sorted(active, key=lambda o: o['id']) + list(reversed(done))}
+
+    def delivering_order(self):
+        with self._orders_lock:
+            return next((dict(o) for o in self.orders if o['status'] == 'delivering'), None)
+
+    # ---- Robot Sagligi ----
+    def _hw_rx(self, key, value):
+        self._hw[key] = value
+        self._hw['rx'] = time.monotonic()
+
+    def _stm32_info_cb(self, msg):
+        try:
+            self._hw['info'] = json.loads(msg.data)
+        except ValueError:
+            pass
+
+    def health_payload(self):
+        """Telefonun "Robot Sagligi" karti: her satir {ok: True|False|None, text}.
+        ok=None = bilgi yok / gecerli degil (gri)."""
+        now = time.monotonic()
+        hw = self._hw
+        stm_ok = now - hw['rx'] < 1.5
+        info = hw['info'] or {}
+        h = {}
+        h['brain'] = {'ok': self.patrol_alive(),
+                      'text': 'çalışıyor' if self.patrol_alive() else 'ÇALIŞMIYOR'}
+        h['stm32'] = {'ok': stm_ok,
+                      'text': (f"bağlı · yazılım {info.get('fw', '?')}"
+                               + ('' if info.get('imu') else ' · IMU yok')) if stm_ok else 'BAĞLI DEĞİL'}
+        scan_ok = self._scan_msg is not None and now - self._scan_rx < 1.5
+        h['lidar'] = {'ok': scan_ok, 'text': 'çalışıyor' if scan_ok else 'VERİ YOK'}
+        for key, name in (('estop', 'estop'), ('bumper', 'bumper')):
+            if not stm_ok or hw[key] is None:
+                h[name] = {'ok': None, 'text': '—'}
+            else:
+                h[name] = {'ok': not hw[key], 'text': 'BASILI / kablo kopuk' if hw[key] else 'normal'}
+        volt = hw['battery_v']
+        if not stm_ok or volt is None:
+            h['battery'] = {'ok': None, 'text': '—'}
+        elif volt < 5.0:
+            h['battery'] = {'ok': None, 'text': 'takılı değil'}
+        else:
+            low = volt < BATTERY_LOW_V
+            h['battery'] = {'ok': not low, 'text': f'{volt:.1f} V' + (' · DÜŞÜK, şarj edin' if low else '')}
+        h['localization'] = self._localization_health()
+        problems = [k for k, v in h.items() if v['ok'] is False]
+        h['summary'] = {'ok': not problems, 'text': 'Her şey yolunda' if not problems
+                        else 'Dikkat: ' + ', '.join(HEALTH_NAMES[k] for k in problems)}
+        return h
+
+    def _localization_health(self):
+        if self.mode == 'mapping':
+            return {'ok': None, 'text': 'haritalama sürüyor'}
+        if not self.launch_mgr.is_running('nav'):
+            return {'ok': False if self.has_saved_map() else None,
+                    'text': 'konum sistemi kapalı' if self.has_saved_map() else 'harita yok'}
+        if self._amcl_rx_t < self._nav_started_t or self._amcl_std is None:
+            return {'ok': False, 'text': 'KONUM BİLİNMİYOR · Kurulum → "Robot Burada"'}
+        sx, sy, syaw = self._amcl_std
+        err = max(sx, sy)
+        if err > LOCALIZATION_MAX_STD_M or syaw > LOCALIZATION_MAX_STD_DEG:
+            return {'ok': False, 'text': f'emin değil (±{err:.1f} m) · "Robot Burada" ile düzeltin'}
+        return {'ok': True, 'text': f'biliyor (±{max(err, 0.01) * 100:.0f} cm)'}
+
     # ---- patrol.py (devriye beyni) ----
     def missing_target(self, path, table=None):
         """Gorev komutu yapilamiyorsa arayuze gosterilecek sebep (yoksa None).
@@ -746,6 +976,7 @@ class CafeUiServerNode(Node):
         except ValueError:
             return
         self._patrol_status, self._patrol_rx = status, time.monotonic()
+        self._check_delivery(status)
         # patrol.py'nin sesli mesajlari (say) robotun KENDI ekraninda, ayni
         # kadin sesiyle okunsun: sunucunun konusma sirasina aktarilir.
         seq = status.get('speak_seq', 0)
@@ -901,9 +1132,15 @@ class CafeUiServerNode(Node):
         status.update(speak_text=self.speak_text, speak_seq=self.speak_seq, speak_expr=self.speak_expr)
         # Ekran: gercek robotta varsayilan ACIK (gozler); patrol is yaparken de acar.
         status['screen_on'] = self.screen_on or bool(status.get('screen_on'))
+        # Teslim edilen siparis (robot ekraninda barmende/masada fis olarak gosterilir)
+        delivering = self.delivering_order()
+        status['delivery_order'] = json.dumps(delivering, ensure_ascii=False) if delivering else ''
         age = round(time.monotonic() - self._patrol_rx, 1) if alive else 0.1
+        with self._orders_lock:
+            active = sum(o['status'] in ACTIVE_ORDER_STATUSES for o in self.orders)
         return {'status': json.dumps(status), 'count': 1, 'age': age, 'patrol': alive,
-                'theme': self.theme}
+                'theme': self.theme, 'health': self.health_payload(),
+                'orders_seq': self.orders_seq, 'orders_active': active}
 
     def _make_handler(node_self):
         class Handler(BaseHTTPRequestHandler):
@@ -941,7 +1178,10 @@ class CafeUiServerNode(Node):
 
             def do_GET(self):
                 path = self.path.split('?')[0]
-                if path in ('/', '/index.html'):
+                # Ayni sayfa, adrese gore rol degistirir (index.html <body> basi):
+                # /eyes = kafadaki yuz ekrani, /panel = govdedeki dev dokunmatik
+                # ekran, / = ikisi bir arada (eski tek ekranli duzen).
+                if path in ('/', '/index.html', '/eyes', '/panel'):
                     self._serve_file('index.html', 'text/html; charset=utf-8')
                 elif path in ('/setup', '/setup.html'):
                     self._serve_file('setup.html', 'text/html; charset=utf-8')
@@ -975,6 +1215,10 @@ class CafeUiServerNode(Node):
                     self._send_json({'volume': vol if vol is not None else -1})
                 elif path == '/api/theme':
                     self._send_json(node_self.theme)
+                elif path == '/api/health':
+                    self._send_json(node_self.health_payload())
+                elif path == '/api/orders':
+                    self._send_json(node_self.orders_view())
                 else:
                     self.send_error(404)
 
@@ -1082,7 +1326,41 @@ class CafeUiServerNode(Node):
                         return
                     to_patrol(f"goto:{table}:{d.get('action') or 'welcome_menu'}")
                 elif path == '/api/place_order':
-                    to_patrol(f'order:{raw or "{}"}')
+                    # Once kaydet (garson telefonu bildirim + liste), sonra robot
+                    # siparisi barmene iletsin (beyin yoksa da kayit dusmesin).
+                    order = node_self.add_order(raw)
+                    if node_self.patrol_alive():
+                        node_self.publish_patrol(f'order:{raw or "{}"}')
+                    ok(order_id=order['id'] if order else None)
+                elif path == '/api/order_ready':
+                    try:
+                        order, coming_now = node_self.order_ready(int(d.get('id')))
+                    except (TypeError, ValueError):
+                        error('sipariş no gerekli')
+                        return
+                    except RuntimeError as e:
+                        error(str(e))
+                        return
+                    # coming_now=False: robot musteriyle/baska teslimatla ilgileniyor,
+                    # siraya aldi - o is biter bitmez gelecek.
+                    ok(table=order['table'], coming_now=coming_now)
+                elif path == '/api/order_cancel':
+                    try:
+                        node_self.order_cancel(int(d.get('id')))
+                    except (TypeError, ValueError):
+                        error('sipariş no gerekli')
+                        return
+                    except RuntimeError as e:
+                        error(str(e))
+                        return
+                    ok()
+                elif path == '/api/continue':
+                    try:
+                        node_self.robot_continue()
+                    except RuntimeError as e:
+                        error(str(e))
+                        return
+                    ok()
                 elif path == '/api/send_message':
                     frm, to, text = clean(d.get('from')), clean(d.get('to')), clean(d.get('text'))
                     if not (frm and to and text):

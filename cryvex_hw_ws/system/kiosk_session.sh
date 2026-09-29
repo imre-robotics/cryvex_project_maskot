@@ -28,4 +28,6 @@ exec chromium \
     --disable-features=Translate \
     --overscroll-history-navigation=0 \
     --autoplay-policy=no-user-gesture-required \
-    http://localhost:8080/
+    http://localhost:8080/eyes
+# /eyes = robotun kafasindaki bu ekranda SADECE yuz (menu/siparis/ayarlar
+# govdedeki dev ekranda: /panel - tablet ya da Pi'nin ikinci ekrani).

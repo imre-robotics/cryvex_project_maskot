@@ -20,9 +20,14 @@ def generate_launch_description():
     declare_use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='true')
     declare_map = DeclareLaunchArgument(
         'map', default_value=os.path.join(gazebo_pkg_dir, 'maps', 'cafe_map.yaml'))
+    # Humble (Gazebo sim) -> nav2_params.yaml; Jazzy (Isaac Sim konteyneri) ->
+    # nav2_params_jazzy.yaml (Jazzy'nin yeni eklenti adlari/bt_navigator bicimi).
+    # tablet_server bu launch'i argumansiz cagirdigi icin secim burada yapiliyor.
+    default_params = ('nav2_params_jazzy.yaml' if os.environ.get('ROS_DISTRO') == 'jazzy'
+                      else 'nav2_params.yaml')
     declare_params = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(gazebo_pkg_dir, 'config', 'nav2_params.yaml'),
+        default_value=os.path.join(gazebo_pkg_dir, 'config', default_params),
         description='Kafeye ozel Nav2 parametreleri (dinamik engel costmap ayarli).')
 
     # Unitree L1 3D nokta bulutunu 2D /scan'e cevirir.

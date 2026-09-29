@@ -150,6 +150,13 @@
     const $ = (id) => document.getElementById(id);
     const mapImg = $('map-img'), overlay = $('overlay'), hint = $('hint');
 
+    // "Devriye Ekrani"na donus: kurulumu hangi ekran actiysa ona (robotun kafadaki
+    // garson ekrani /eyes; tek ekranli duzen /). Bilinmeyen deger -> '/'.
+    const home = new URLSearchParams(location.search).get('from');
+    if (['/', '/eyes', '/panel'].includes(home)) {
+        document.querySelectorAll('a.home-link, #btn-back-home').forEach(a => { a.href = home; });
+    }
+
     let mapInfo = null;                 // {resolution, origin:[x,y,theta], width, height}
     let points = { barista: null, door: null, tables: [] };
     let mode = null;                    // null | 'table' | 'door' | 'barista'

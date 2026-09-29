@@ -34,13 +34,14 @@ yayinlanir - robot_localization (EKF) bunu LiDAR/AMCL ile surekli duzeltir
 TF'i zaten EKF'nin kendisi yayinliyor (ekf.yaml publish_tf:true), ikisi
 ayni TF'i yayinlarsa catisir.
 """
+import json
 import math
 import threading
 import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from geometry_msgs.msg import Twist, Quaternion
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Range, Imu, BatteryState
@@ -85,6 +86,10 @@ class Stm32Bridge(Node):
         self.battery_pub = self.create_publisher(BatteryState, '/battery_state', 10)
         self.estop_pub = self.create_publisher(Bool, '/estop_state', 10)
         self.bumper_pub = self.create_publisher(Bool, '/bumper_state', 10)
+        # Kartin READY/INFO bilgisi (JSON: fw, reset, imu) - sonradan acilan
+        # dugumler de (arayuz "Robot Sagligi") son degeri alsin: kalici (latched).
+        self.info_pub = self.create_publisher(
+            String, '/stm32_info', QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.command_pub = self.create_publisher(String, '/patrol_command', 10)
 
         self._lx_mm_s = 0
@@ -225,6 +230,8 @@ class Stm32Bridge(Node):
             self.get_logger().info(
                 f"STM32 hazir: yazilim {info.get('fw', '?')}, acilis nedeni {info.get('reset', '?')}, "
                 f"IMU {'var' if self._imu_ok else 'YOK - /imu/data_raw yayinlanmiyor'}")
+            self.info_pub.publish(String(data=json.dumps(
+                {'fw': info.get('fw', '?'), 'reset': info.get('reset', '?'), 'imu': self._imu_ok})))
             if info.get('reset') == 'iwdg':
                 self.get_logger().error(
                     'STM32 TAKILMIS ve donanim bekcisi (IWDG) yeniden baslatmis - kart yazilimi '

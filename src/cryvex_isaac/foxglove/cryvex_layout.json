@@ -1,0 +1,160 @@
+{
+  "configById": {
+    "3D!cryvex": {
+      "followMode": "follow-position",
+      "followTf": "base_footprint",
+      "cameraState": {
+        "distance": 14,
+        "perspective": true,
+        "phi": 45,
+        "thetaOffset": 90,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "scene": {
+        "enableStats": false,
+        "backgroundColor": "#1b1f24",
+        "transforms": { "showLabel": false, "axisScale": 0.6 }
+      },
+      "transforms": {
+        "frame:map": { "visible": false },
+        "frame:odom": { "visible": false }
+      },
+      "topics": {
+        "/map": { "visible": true, "colorMode": "map", "alpha": 0.9 },
+        "/global_costmap/costmap": { "visible": false, "colorMode": "costmap", "alpha": 0.5 },
+        "/local_costmap/costmap": { "visible": true, "colorMode": "costmap", "alpha": 0.6 },
+        "/keepout_filter_mask": { "visible": false, "colorMode": "map", "alpha": 0.4 },
+        "/scan": {
+          "visible": true,
+          "colorMode": "flat",
+          "flatColor": "#ff3b30",
+          "pointSize": 5,
+          "pointShape": "circle"
+        },
+        "/points": { "visible": false, "pointSize": 2, "colorMode": "colormap", "colorField": "z" },
+        "/plan": { "visible": true, "type": "line", "lineWidth": 0.06, "gradient": ["#34c759ff", "#34c759ff"] },
+        "/local_plan": { "visible": true, "type": "line", "lineWidth": 0.05, "gradient": ["#0a84ffff", "#0a84ffff"] },
+        "/local_costmap/published_footprint": { "visible": true },
+        "/amcl_pose": { "visible": false },
+        "/particle_cloud": { "visible": false }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "layerId": "foxglove.Grid",
+          "frameId": "map",
+          "size": 20,
+          "divisions": 20,
+          "lineWidth": 1,
+          "color": "#ffffff22",
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "pose_estimate",
+        "poseTopic": "/goal_pose",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {}
+    },
+    "RawMessages!patrolstatus": {
+      "topicPath": "/patrol_status.data",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    },
+    "Publish!start": {
+      "topicName": "/patrol_command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "Devriye Başlat",
+      "buttonTooltip": "patrol.py: start",
+      "buttonColor": "#00a871",
+      "advancedView": false,
+      "value": "{\n  \"data\": \"start\"\n}"
+    },
+    "Publish!gohome": {
+      "topicName": "/patrol_command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "Üsse Dön",
+      "buttonTooltip": "patrol.py: go_home",
+      "buttonColor": "#0a84ff",
+      "advancedView": false,
+      "value": "{\n  \"data\": \"go_home\"\n}"
+    },
+    "Publish!stop": {
+      "topicName": "/patrol_command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "DURDUR",
+      "buttonTooltip": "patrol.py: stop (her şeyi keser)",
+      "buttonColor": "#ff3b30",
+      "advancedView": false,
+      "value": "{\n  \"data\": \"stop\"\n}"
+    },
+    "Plot!speed": {
+      "paths": [
+        { "value": "/odom.twist.twist.linear.x", "enabled": true, "timestampMethod": "receiveTime", "label": "odom v (m/s)" },
+        { "value": "/cmd_vel.linear.x", "enabled": true, "timestampMethod": "receiveTime", "label": "cmd_vel v (m/s)" },
+        { "value": "/odom.twist.twist.angular.z", "enabled": true, "timestampMethod": "receiveTime", "label": "odom w (rad/s)" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 30
+    },
+    "RosOut!log": {
+      "searchTerms": [],
+      "minLogLevel": 2
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "direction": "row",
+    "splitPercentage": 66,
+    "first": "3D!cryvex",
+    "second": {
+      "direction": "column",
+      "splitPercentage": 30,
+      "first": "RawMessages!patrolstatus",
+      "second": {
+        "direction": "column",
+        "splitPercentage": 16,
+        "first": {
+          "direction": "row",
+          "splitPercentage": 33,
+          "first": "Publish!start",
+          "second": {
+            "direction": "row",
+            "splitPercentage": 50,
+            "first": "Publish!gohome",
+            "second": "Publish!stop"
+          }
+        },
+        "second": {
+          "direction": "column",
+          "splitPercentage": 50,
+          "first": "Plot!speed",
+          "second": "RosOut!log"
+        }
+      }
+    }
+  }
+}

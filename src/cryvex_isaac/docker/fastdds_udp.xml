@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fast DDS: sadece UDP. Isaac Sim ve ROS konteynerleri farkli kullanici
+  kimlikleriyle calisir; Fast DDS'in varsayilan paylasimli bellek (SHM)
+  tasimasi bu durumda sessizce basarisiz olup "topic gorunuyor ama veri
+  gelmiyor" sorununa yol acar. UDP her iki yonde de guvenilir calisir.
+  (Isaac Sim belgelerindeki fastdds.xml ornegiyle ayni yapi.)
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <transport_descriptors>
+        <transport_descriptor>
+            <transport_id>UdpTransport</transport_id>
+            <type>UDPv4</type>
+        </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="udp_transport_profile" is_default_profile="true">
+        <rtps>
+            <userTransports>
+                <transport_id>UdpTransport</transport_id>
+            </userTransports>
+            <useBuiltinTransports>false</useBuiltinTransports>
+        </rtps>
+    </participant>
+</profiles>

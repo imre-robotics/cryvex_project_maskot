@@ -1,0 +1,86 @@
+# Cryvex: Isaac Sim 6.1 (fizik/sensor) + ROS 2 Jazzy (Nav2/patrol/tablet) + Foxglove koprusu
+#
+# NVIDIA RTX GPU'lu (en az RTX 4080 / 16 GB VRAM, 32 GB RAM) Linux makinede:
+#     ./up.sh                    # ekransiz
+#     ISAAC_MODE=--livestream ./up.sh   # + Isaac Sim WebRTC Streaming Client ile izle
+#
+# Sonra kendi bilgisayarindan:
+#     Foxglove  -> ws://<gpu-makine-ip>:8765   (duzen: ../foxglove/cryvex_layout.json)
+#     Tablet UI -> http://<gpu-makine-ip>:8080
+# (Bulut GPU'da portlari acmak yerine SSH tuneli: ssh -L 8765:localhost:8765 -L 8080:localhost:8080 <sunucu>)
+name: cryvex-isaac
+
+x-ros-env: &ros-env
+  ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  FASTRTPS_DEFAULT_PROFILES_FILE: /cryvex_dds/fastdds_udp.xml
+  FASTDDS_DEFAULT_PROFILES_FILE: /cryvex_dds/fastdds_udp.xml
+
+services:
+  isaac:
+    image: nvcr.io/nvidia/isaac-sim:6.1.0
+    network_mode: host          # DDS kesfi + WebRTC (TCP 49100, UDP 47998)
+    ipc: host
+    entrypoint: ["/isaac-sim/python.sh"]
+    command: ["/cryvex_src/cryvex_isaac/isaac/run_cafe_sim.py", "${ISAAC_MODE:---headless}"]
+    environment:
+      <<: *ros-env
+      ACCEPT_EULA: "Y"
+      PRIVACY_CONSENT: "Y"
+      # Konteyner Ubuntu 24.04: dahili ROS 2 Jazzy kutuphaneleri otomatik yuklenir.
+      CRYVEX_USD_CACHE: /isaac-sim/.cache/cryvex_usd
+      CRYVEX_READY_FILE: /tmp/cryvex_isaac_ready
+    volumes:
+      - ../..:/cryvex_src:ro                    # cryvex_ws/src (URDF, kafe dunyasi, betikler)
+      - ./fastdds_udp.xml:/cryvex_dds/fastdds_udp.xml:ro
+      - isaac-cache:/isaac-sim/.cache
+      - isaac-computecache:/isaac-sim/.nv/ComputeCache
+      - isaac-kitcache:/isaac-sim/kit/cache
+      - isaac-logs:/isaac-sim/.nvidia-omniverse/logs
+      - isaac-data:/isaac-sim/.local/share/ov/data
+    healthcheck:
+      # run_cafe_sim.py sahne + sensorler hazir olunca bu dosyayi yazar.
+      # Ilk acilista shader derlemesi 10+ dk surebilir.
+      test: ["CMD", "test", "-f", "/tmp/cryvex_isaac_ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  ros:
+    build:
+      context: .
+      dockerfile: ros.Dockerfile
+    image: cryvex-isaac-ros:jazzy
+    network_mode: host          # foxglove :8765, tablet UI :8080
+    ipc: host
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"   # up.sh doldurur
+    environment:
+      <<: *ros-env
+    volumes:
+      - ../..:/ws/src                           # yazilabilir: waypoints.json / haritalar buraya
+      - ./fastdds_udp.xml:/cryvex_dds/fastdds_udp.xml:ro
+      - ros-build:/ws/build
+      - ros-install:/ws/install
+      - ros-log:/ws/log
+    depends_on:
+      isaac:
+        condition: service_healthy
+    command: ["ros2", "launch", "cryvex_isaac", "isaac_bringup.launch.py"]
+
+volumes:
+  isaac-cache:
+  isaac-computecache:
+  isaac-kitcache:
+  isaac-logs:
+  isaac-data:
+  ros-build:
+  ros-install:
+  ros-log:

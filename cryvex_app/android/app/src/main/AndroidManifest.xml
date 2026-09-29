@@ -2,6 +2,9 @@
     <!-- Robotla ayni WiFi agi uzerinden duz HTTP (TLS yok, tablet_server.py
          basit bir http.server) - internet + cleartext izni gerekiyor. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Yeni sipariş / robot "Devam" bekliyor bildirimleri (Android 13+ izin ister) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <application
         android:label="cryvex_control"
         android:name="${applicationName}"

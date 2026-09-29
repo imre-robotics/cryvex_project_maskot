@@ -8,6 +8,7 @@ import '../tts.dart';
 import '../widgets/password_sheet.dart';
 import 'connect_screen.dart';
 import 'joystick_screen.dart';
+import 'panel_screen.dart';
 import 'setup_webview_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -135,8 +136,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (st.waitingForContinue) ...[
+                  _continueCard(st),
+                  const SizedBox(height: 12),
+                ],
                 _statusCard(st),
                 const SizedBox(height: 12),
+                if (st.orders.isNotEmpty) ...[
+                  _ordersCard(st),
+                  const SizedBox(height: 12),
+                ],
+                if (st.health.isNotEmpty) ...[
+                  _healthCard(st),
+                  const SizedBox(height: 12),
+                ],
                 _volumeCard(),
                 const SizedBox(height: 18),
                 _sectionLabel('Devriye'),
@@ -161,6 +174,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     () => _openJoystick(JoyMode.map)),
                 _actionButton('📍 Masa/Kapı Noktaları', CryvexButtonStyle.gray,
                     () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SetupWebviewScreen()))),
+                _actionButton('📺 Bu Cihazı Robotun Dev Ekranı Yap', CryvexButtonStyle.gray, _startPanelMode),
                 const SizedBox(height: 18),
                 _sectionLabel('🎨 Robotun Görünümü'),
                 _themeCard(),
@@ -203,6 +217,259 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         SizedBox(width: 38, child: Text('$_volume%', textAlign: TextAlign.right,
             style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5))),
+      ]),
+    );
+  }
+
+  Future<void> _startPanelMode() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Dev Ekran Modu'),
+        content: const Text(
+            'Bu cihaz robotun gövdesindeki büyük dokunmatik ekran olur: menü, sipariş, mesaj ve '
+            'ayarlar burada açılır, boştayken kocaman CRYVEX yazar.\n\n'
+            'Uygulama bundan sonra hep bu modda açılır. Çıkmak için sol üst köşeye uzun basıp şifre girin.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Vazgeç')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Başlat')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PanelScreen()));
+  }
+
+  void _snack(String text) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  // Robot barmende/masada "Devam" bekliyor: robot ekranındakiyle aynı kocaman buton.
+  Widget _continueCard(RobotState st) {
+    final (title, body, button) = waitStates[st.state]!;
+    final table = st.deliveryTable.isNotEmpty ? ' · ${st.deliveryTable}' : '';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: CryvexColors.cyan.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: CryvexColors.cyan, width: 1.5),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('$title$table', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text(body, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+        const SizedBox(height: 4),
+        const Text('Basılmadan robot yerinden kıpırdamaz.',
+            style: TextStyle(color: CryvexColors.amber, fontSize: 12)),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 72,
+          child: ElevatedButton(
+            style: CryvexButtonStyle.cyan,
+            onPressed: () async {
+              try {
+                final res = await _api.continueRobot();
+                _snack(res['result'] == 'ok' ? '▶ Robot devam ediyor' : '⚠ ${res['reason'] ?? ''}');
+              } catch (_) {
+                _snack('❌ Robota ulaşılamadı');
+              }
+            },
+            child: Text(button, textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // Siparişler: robot ekranından verilenler. Barmen hazırlayınca "Hazır" ->
+  // robot barmenden alıp siparişin masasına götürür.
+  Widget _ordersCard(RobotState st) {
+    final active = st.orders
+        .where((o) => o['status'] == 'preparing' || o['status'] == 'ready' || o['status'] == 'delivering')
+        .toList();
+    final done = st.orders.where((o) => o['status'] == 'delivered' || o['status'] == 'cancelled').take(3).toList();
+    final nowServer = DateTime.now().millisecondsSinceEpoch / 1000 + st.serverClockOffset;
+    String ago(Map<String, dynamic> o) {
+      final min = ((nowServer - ((o['created'] ?? nowServer) as num)) / 60).floor();
+      if (min < 1) return 'az önce';
+      if (min < 60) return '$min dk önce';
+      return '${min ~/ 60} sa önce';
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: CryvexColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: active.isNotEmpty ? CryvexColors.amber.withValues(alpha: 0.6) : CryvexColors.cardLine),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Text('🧾 Siparişler', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+          const Spacer(),
+          Text(active.isEmpty ? 'bekleyen yok' : '${active.length} bekliyor',
+              style: TextStyle(color: active.isEmpty ? CryvexColors.textMuted : CryvexColors.amber, fontSize: 12.5)),
+        ]),
+        for (final o in active) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: CryvexColors.cardLine),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Text('${o['table']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text('  · #${o['id']} · ${ago(o)}', style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12)),
+                const Spacer(),
+                Text('${formatPrice(o['total'])} ₺',
+                    style: const TextStyle(color: CryvexColors.green, fontWeight: FontWeight.w700)),
+              ]),
+              const SizedBox(height: 4),
+              Text(orderItemsText(o), style: const TextStyle(fontSize: 13.5)),
+              const SizedBox(height: 10),
+              if (o['status'] == 'preparing')
+                Row(children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: CryvexButtonStyle.green,
+                      onPressed: () => _orderReady(o),
+                      child: const Text('✅ Hazır – Robot Götürsün'),
+                    ),
+                  ),
+                  TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
+                ])
+              else if (o['status'] == 'ready')
+                // Robot müşteriyle / başka teslimatla ilgileniyor: sıraya aldı,
+                // o işten çıkar çıkmaz gelecek (patrol.py önceliği teslimat).
+                Row(children: [
+                  const Expanded(
+                    child: Text('⏳ Sırada – robot işini bitirince gelecek',
+                        style: TextStyle(color: CryvexColors.amber, fontWeight: FontWeight.w600)),
+                  ),
+                  TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
+                ])
+              else
+                const Text('🚚 Robot götürüyor', style: TextStyle(color: CryvexColors.cyan, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ],
+        if (done.isNotEmpty) const SizedBox(height: 8),
+        for (final o in done)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Text(
+              '${o['status'] == 'delivered' ? '✓ teslim edildi' : '✕ iptal'} · ${o['table']} · ${orderItemsText(o)}',
+              style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Future<void> _orderReady(Map<String, dynamic> o) async {
+    try {
+      final res = await _api.orderReady(o['id'] as int);
+      if (res['result'] != 'ok') {
+        _snack('⚠ ${res['reason'] ?? 'gönderilemedi'}');
+      } else if (res['coming_now'] == true) {
+        _snack('🚚 Robot ${o['table']} siparişi için barmene geliyor');
+      } else {
+        _snack('⏳ Sıraya alındı: robot elindeki işi bitirince hemen gelecek');
+      }
+    } catch (_) {
+      _snack('❌ Robota ulaşılamadı');
+    }
+    if (mounted) context.read<RobotState>().refreshOrders();
+  }
+
+  Future<void> _orderCancel(Map<String, dynamic> o) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${o['table']} siparişi iptal edilsin mi?'),
+        content: Text(orderItemsText(o)),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Vazgeç')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('İptal Et')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+    try {
+      final res = await _api.orderCancel(o['id'] as int);
+      _snack(res['result'] == 'ok' ? 'Sipariş iptal edildi' : '⚠ ${res['reason'] ?? ''}');
+    } catch (_) {
+      _snack('❌ Robota ulaşılamadı');
+    }
+    if (mounted) context.read<RobotState>().refreshOrders();
+  }
+
+  // Robot Sağlığı: sunucunun ölçtüğü her parça için yeşil (iyi) / kırmızı
+  // (sorun) / gri (bilgi yok) - sahada "neden gitmiyor?" sorusunun cevabı.
+  static const _healthRows = [
+    ('brain', '🧠', 'Devriye beyni'),
+    ('stm32', '🔌', 'STM32 (motor kartı)'),
+    ('lidar', '📡', 'LiDAR'),
+    ('estop', '🛑', 'Acil stop'),
+    ('bumper', '🧱', 'Tampon'),
+    ('battery', '🔋', 'Batarya'),
+    ('localization', '📍', 'Konum'),
+  ];
+
+  Widget _healthCard(RobotState st) {
+    Color dot(dynamic ok) => ok == true
+        ? CryvexColors.green
+        : ok == false
+            ? CryvexColors.red
+            : CryvexColors.textMuted;
+    final summary = st.health['summary'] as Map? ?? {};
+    final allOk = summary['ok'] == true;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: CryvexColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: allOk ? CryvexColors.cardLine : CryvexColors.red.withValues(alpha: 0.5)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('🩺 Robot Sağlığı', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+          const Spacer(),
+          Flexible(
+            child: Text('${summary['text'] ?? ''}',
+                textAlign: TextAlign.right,
+                style: TextStyle(color: allOk ? CryvexColors.green : CryvexColors.red, fontSize: 12.5,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        for (final (key, icon, label) in _healthRows)
+          if (st.health[key] is Map)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Container(width: 9, height: 9,
+                      decoration: BoxDecoration(color: dot(st.health[key]['ok']), shape: BoxShape.circle)),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(width: 150, child: Text('$icon $label', style: const TextStyle(fontSize: 13))),
+                Expanded(
+                  child: Text('${st.health[key]['text']}',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: st.health[key]['ok'] == false ? CryvexColors.red : CryvexColors.textMuted)),
+                ),
+              ]),
+            ),
       ]),
     );
   }

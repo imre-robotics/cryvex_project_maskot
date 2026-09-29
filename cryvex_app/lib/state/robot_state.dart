@@ -4,6 +4,28 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/discovery.dart';
 import '../api/robot_api.dart';
+import '../notify.dart';
+
+/// "1× Latte, 2× Kurabiye"
+String orderItemsText(Map<String, dynamic> order) => [
+      for (final i in (order['items'] as List? ?? [])) '${i['qty']}× ${i['name']}',
+    ].join(', ');
+
+/// 125.0 -> "125", 12.5 -> "12.5"
+String formatPrice(dynamic v) {
+  final n = (v is num) ? v : num.tryParse('$v') ?? 0;
+  return n == n.roundToDouble() ? n.round().toString() : n.toStringAsFixed(1);
+}
+
+/// Robotun "Devam" beklediği durumlar (patrol.py) -> telefonda kocaman buton.
+const waitStates = {
+  'at_barista': ('🔔 Sipariş barmende', 'Robot siparişi barmene iletti. Alınca devam ettirin.',
+      '👍 Siparişi Aldım · Devriyeye Devam Et'),
+  'pickup_wait': ('📦 Robot barmende bekliyor', 'Hazır siparişi robota yerleştirin.',
+      '✅ Yüklendi · Masaya Götür'),
+  'served_wait': ('🍽️ Robot masada bekliyor', 'Müşteri siparişini alınca devam ettirin.',
+      '👍 Teslim Edildi · Devriyeye Devam Et'),
+};
 
 /// Uygulama genelinde paylaşılan bağlantı + robot durumu. index.html'deki
 /// pollStatus()'un Flutter karşılığı - /api/status'u periyodik okur, /patrol_status
@@ -23,6 +45,22 @@ class RobotState extends ChangeNotifier {
   bool screenOn = false;
   bool configured = false;
   String mode = 'unconfigured';
+
+  /// "Robot Sağlığı" (sunucunun health_payload'u): anahtar -> {ok: bool|null, text}
+  Map<String, dynamic> health = {};
+
+  // ---- siparişler ----
+  List<Map<String, dynamic>> orders = [];
+  double serverClockOffset = 0;      // robot saati - telefon saati (sn): "x dk önce" robotun saatiyle
+  String deliveryTable = '';         // robotun şu an götürdüğü siparişin masası
+  int _ordersSeq = -1;
+  Set<int>? _knownOrderIds;          // null = ilk yükleme (eski siparişler için bildirim yok)
+  String _prevState = '';
+
+  bool get waitingForContinue => waitStates.containsKey(state);
+
+  /// Dev Ekran Modunda (müşteriye dönük tablet) sipariş/robot bildirimleri kapalı.
+  bool notificationsEnabled = true;
 
   Timer? _pollTimer;
   bool searching = false;   // robot agda araniyor (IP degismis olabilir)
@@ -66,13 +104,20 @@ class RobotState extends ChangeNotifier {
     }
   }
 
+  // Birden fazla ekran sorgulama isteyebilir (ör. Ana Panel -> Dev Ekran geçişinde
+  // eski ekranın dispose'u yenisinin sorgusunu durdurmasın): kullanıcı sayacı.
+  int _pollUsers = 0;
+
   void startPolling() {
-    _pollTimer?.cancel();
+    _pollUsers++;
+    if (_pollTimer != null) return;
     _poll();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) => _poll());
   }
 
   void stopPolling() {
+    if (_pollUsers > 0) _pollUsers--;
+    if (_pollUsers > 0) return;
     _pollTimer?.cancel();
     _pollTimer = null;
   }
@@ -84,6 +129,8 @@ class RobotState extends ChangeNotifier {
       connected = true;
       statusCount = (data['count'] ?? 0) as int;
       statusAge = ((data['age'] ?? -1) as num).toDouble();
+      final h = data['health'];
+      health = h is Map<String, dynamic> ? h : {};
       final raw = data['status'];
       if (raw is String && raw.isNotEmpty) {
         try {
@@ -93,9 +140,15 @@ class RobotState extends ChangeNotifier {
           mapReady = (info['map_ready'] ?? true) as bool;
           rescueActive = (info['rescue_active'] ?? false) as bool;
           screenOn = (info['screen_on'] ?? false) as bool;
-        } catch (_) {
+          deliveryTable = (info['delivery_table'] ?? '') as String;        } catch (_) {
           // henuz patrol.py'den veri gelmemis olabilir - sessiz gec
         }
+      }
+      _notifyWaitState();
+      final seq = data['orders_seq'];
+      if (seq is int && seq != _ordersSeq) {
+        _ordersSeq = seq;
+        await refreshOrders();
       }
       final modeData = await api!.mode();
       configured = (modeData['configured'] ?? false) as bool;
@@ -108,6 +161,40 @@ class RobotState extends ChangeNotifier {
       if (++_failStreak % 10 == 3 && !searching) unawaited(findRobot());
     }
     notifyListeners();
+  }
+
+  /// Sipariş listesini çeker; yeni gelen siparişler için bildirim gösterir.
+  Future<void> refreshOrders() async {
+    if (api == null) return;
+    try {
+      final data = await api!.orders();
+      orders = [for (final o in (data['orders'] as List? ?? [])) Map<String, dynamic>.from(o as Map)];
+      serverClockOffset = ((data['now'] ?? 0) as num).toDouble() - DateTime.now().millisecondsSinceEpoch / 1000;
+    } catch (_) {
+      return;
+    }
+    final ids = {for (final o in orders) o['id'] as int};
+    final known = _knownOrderIds;
+    if (known != null && notificationsEnabled) {
+      for (final o in orders) {
+        if (!known.contains(o['id']) && o['status'] == 'preparing') {
+          Notifier.show(1000 + (o['id'] as int), '🧾 Yeni sipariş · ${o['table']}',
+              '${orderItemsText(o)} – ${formatPrice(o['total'])} ₺');
+        }
+      }
+    }
+    _knownOrderIds = {...?known, ...ids};
+    notifyListeners();
+  }
+
+  // Robot barmende/masada "Devam" beklemeye başlayınca cebindeki garsona haber ver.
+  void _notifyWaitState() {
+    if (state != _prevState && waitStates.containsKey(state) && _prevState.isNotEmpty && notificationsEnabled) {
+      final (title, body, _) = waitStates[state]!;
+      final table = deliveryTable.isNotEmpty ? ' · $deliveryTable' : '';
+      Notifier.show(1, '$title$table', body);
+    }
+    _prevState = state;
   }
 
   @override
