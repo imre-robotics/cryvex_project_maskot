@@ -68,14 +68,14 @@ def generate_launch_description():
         output='screen',
         parameters=[slam_params_file, {
             'use_sim_time': use_sim_time,
-            # GECICI - bkz. yukaridaki docstring (sabit/gercek olmayan odom).
-            'minimum_travel_distance': 0.0,
-            'minimum_travel_heading': 0.0,
-            # GECICI: odom yokken hareketi SADECE tarama eslestirmesi bulur ve
-            # tahminin yalnizca ±25cm/±20° cevresine bakar. Varsayilan 0.5sn'de bir
-            # tarama islenince yuruyus hizinda (~50cm) konum kaybediliyor; her
-            # tarama (7 Hz, ~14cm) islenince alan icinde kalir. Odom gelince kaldirin.
-            'minimum_time_interval': 0.1,
+            # 2026-10-02: motorlar takildi, teker odometrisi LiDAR ile kalibre edildi
+            # (donus %97, ileri %96 uyum) -> motorsuz donemin 0/0/0.1 gecici
+            # degerleri kaldirildi. Her 20 cm ya da ~11 derecede bir tarama islenir:
+            # varsayilan 0.5 m/0.5 rad kafe olcegi icin seyrek, her tarama ise
+            # donerken haritayi gereksiz bozuyordu.
+            'minimum_travel_distance': 0.2,
+            'minimum_travel_heading': 0.2,
+            'minimum_time_interval': 0.5,
             # Canli harita (telefon/ekran) 5sn yerine 1sn'de bir guncellensin.
             'map_update_interval': 1.0,
         }],

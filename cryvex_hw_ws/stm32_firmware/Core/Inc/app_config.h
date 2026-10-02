@@ -10,7 +10,7 @@
 
 /* Yazilim surumu: acilista (ve "INFO" komutuna) READY satirinda gonderilir -
  * Pi tarafi karttaki yazilimi loglardan gorur. Her yuklemede artirin. */
-#define FW_VERSION "1.3.2"
+#define FW_VERSION "1.3.4"
 
 /* ---- Pi5 <-> STM32 haberlesme hatti (2026-10-01) ----
  * 1: USART3 - PC10 (TX) -> Pi GPIO15/RXD (pin 10), PC11 (RX) <- Pi GPIO14/TXD
@@ -43,8 +43,9 @@
  * DMA860H/DM556 analizi sonrasi hoverboard-UART tasarimindan degistirildi -
  * bkz. motor_driver.c). asagidaki 3 sabit FIZIKSEL OLCUM gerektirir, govde
  * kurulunca guncelle - yapı degismez, sadece sayilar. ---- */
-#define WHEEL_DIAMETER_MM   150U  /* YER TUTUCU - tekerlek disi cap, SAHADA olc */
-#define WHEEL_BASE_MM       400U  /* YER TUTUCU - iki teker arasi mesafe, SAHADA olc */
+#define WHEEL_DIAMETER_MM   150U  /* 2026-10-02 olculdu: 15 cm (LiDAR testi 148 mm buldu - uyumlu) */
+#define WHEEL_BASE_MM       540U  /* 2026-10-02 olculdu: teker ortalari arasi 54 cm (400 yer tutucuydu -
+                                    * donuslerde odometri %40 fazla donus sayiyordu, harita bozuluyordu) */
 #define STEPS_PER_REV       3200U /* DM556 DIP anahtari mikroadim ayarina gore
                                     * (varsayilan: 16 mikroadim x 200 tam adim/tur) -
                                     * gercek DIP anahtar konumuna gore guncelle */
@@ -65,9 +66,13 @@
  * (mil ucundan bakinca) AYNI yone dondu. Robotta motorlar karsilikli monte
  * edildigi icin ileri giderken biri saat yonunde, digeri tersine donmeli ->
  * sag teker ters cevrildi. Motorlar govdeye takilinca robot ileri komutunda
- * geri gidiyorsa IKISINI de degistirin; donuyorsa sadece birini. */
+ * geri gidiyorsa IKISINI de degistirin; donuyorsa sadece birini.
+ * 2026-10-02: motorlar tabana takilinca bu tersleme YANLIS cikti - "ileri"
+ * komutunda robot yerinde donuyor, "don" komutunda duz gidiyordu (LiDAR ile
+ * olculdu: 52 derece donus komutunda gercek donus ~2 derece). Sag teker
+ * terslemesi kaldirildi. */
 #define LEFT_WHEEL_DIR_INVERT  0
-#define RIGHT_WHEEL_DIR_INVERT 1
+#define RIGHT_WHEEL_DIR_INVERT 0
 
 /* ---- Batarya voltaj olcumu (ADC1_IN4 / PA4, direnc bolucu uzerinden) ----
  * Motor surucu ekibinin analizi: "batarya 20V'a inerse DM556 alt sinirina

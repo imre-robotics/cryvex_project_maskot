@@ -28,6 +28,18 @@
   <xacro:property name="footprint_radius" value="0.35"/>
   <xacro:property name="base_height" value="0.12"/>
   <xacro:property name="lidar_height" value="0.22"/>  <!-- malzeme listesi rev.4, bolum 5: "yerden ~20-30 cm" -->
+  <!-- 2026-10-02: LiDAR tabanin en yuksek noktasina, merkezden kacik ve donuk
+       takildi. Konum/aci LiDAR'in kendisiyle OLCULDU (90 derece donus + 50 cm ileri
+       testi, tarama eslestirme/ICP): teker ekseni ortasina gore ~10 cm onde,
+       ~12 cm sagda, LiDAR'in 0 derece yonu robotun onune gore -128 derece.
+       Eski degerle (merkez, 0 derece) robot 50 cm ilerleyince duvarlar haritada
+       ~48 cm kayiyordu; bu degerlerle ~5 cm. "On" = robotun +x yonu (STM32
+       *_WHEEL_DIR_INVERT ayarina gore ileri gittigi taraf). Ekran tarafi on
+       olacaksa: iki teker terslemesini de cevirin, lidar_x/lidar_y'nin isaretini
+       degistirin ve lidar_yaw'a 180 derece ekleyin (-128 -> +52). -->
+  <xacro:property name="lidar_x" value="0.104"/>
+  <xacro:property name="lidar_y" value="-0.124"/>
+  <xacro:property name="lidar_yaw" value="${radians(-128)}"/>
 
 
   <material name="cryvex_dark">
@@ -75,7 +87,7 @@
   <joint name="base_link_to_lidar" type="fixed">
     <parent link="base_link"/>
     <child link="lidar_link"/>
-    <origin xyz="0 0 ${lidar_height}" rpy="0 0 0"/>
+    <origin xyz="${lidar_x} ${lidar_y} ${lidar_height}" rpy="0 0 ${lidar_yaw}"/>
   </joint>
 
   <!-- ============ 4x HC-SR04 (STM32 -> stm32_bridge -> /ultrasonic/*) ============
