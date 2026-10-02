@@ -66,7 +66,7 @@ CMD_RESEND_PERIOD_S = 0.10   # STM32'nin 200ms watchdog'unu rahat besler
 CMD_TIMEOUT_S = 0.5
 
 WHEEL_BASE_M = 0.400   # app_config.h WHEEL_BASE_MM ile AYNI TUTULMALI (yer tutucu)
-BATT_LOW_MV = 22000    # app_config.h BATT_LOW_MV ile AYNI TUTULMALI
+BATT_LOW_MV = 23500    # app_config.h BATT_LOW_MV ile AYNI TUTULMALI - 2026-10-02: 22000'den yukseltildi - DM860H en az 24 V ister; LiFePO4'te 23.5 V ~%5-8 kalan sarj
 # Bunun altindaki okuma = batarya TAKILI DEGIL (tezgah testi: Pi/STM32 adaptorden
 # besleniyor, bolucu girisi bos -> ADC 1-3 V arasi gurultu okur). 24 V LiFePO4
 # paket 5 V'a hic inmez (BMS cok once keser). cafe_ui_server.py'deki

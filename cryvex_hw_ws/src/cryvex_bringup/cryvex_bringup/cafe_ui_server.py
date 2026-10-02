@@ -86,7 +86,7 @@ ACTIVE_ORDER_STATUSES = ('preparing', 'ready', 'delivering')
 PATROL_INTERRUPTIBLE = ('idle', 'patrol', 'wander', 'going_home', 'greet_door')
 
 # Robot Sagligi esikleri
-BATTERY_LOW_V = 22.0              # stm32_bridge BATT_LOW_MV ile ayni (24 V LiFePO4)
+BATTERY_LOW_V = 23.5              # stm32_bridge BATT_LOW_MV ile ayni (24 V LiFePO4; DM860H min 24 V)
 LOCALIZATION_MAX_STD_M = 0.5      # AMCL belirsizligi bundan buyukse "emin degil"
 LOCALIZATION_MAX_STD_DEG = 30.0
 # Nav2 acilis bekcisi (2026-10-01): Pi acilirken (Chromium + tum dugumler ayni

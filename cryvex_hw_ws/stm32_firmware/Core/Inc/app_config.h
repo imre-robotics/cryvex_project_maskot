@@ -10,7 +10,7 @@
 
 /* Yazilim surumu: acilista (ve "INFO" komutuna) READY satirinda gonderilir -
  * Pi tarafi karttaki yazilimi loglardan gorur. Her yuklemede artirin. */
-#define FW_VERSION "1.3.1"
+#define FW_VERSION "1.3.2"
 
 /* ---- Pi5 <-> STM32 haberlesme hatti (2026-10-01) ----
  * 1: USART3 - PC10 (TX) -> Pi GPIO15/RXD (pin 10), PC11 (RX) <- Pi GPIO14/TXD
@@ -76,7 +76,9 @@
  * donus DEGIL, o kapsam disi birakildi - bkz. malzeme_listesi_rev5.pdf). */
 #define ADC_VREF_MV         3300U
 #define BATT_DIVIDER_RATIO  10U    /* 1:10 direnc bolucu varsayimi (ör. 90k/10k) - SAHADA dogrula */
-#define BATT_LOW_MV         22000  /* bu esigin altinda stm32_bridge.py uyarir/dur komutu verir */
+#define BATT_LOW_MV         23500  /* bu esigin altinda stm32_bridge.py uyarir/dur komutu verir.
+                                    * 2026-10-02: 22000'den yukseltildi - DM860H en az 24 V ister;
+                                    * LiFePO4 8S'te 23.5 V ~%5-8 kalan sarj (kayip ~%3-5 kapasite). */
 
 /* ---- HC-SR04 TRIG/ECHO pinleri (bkz. stm32_cubemx_ayarlari.md bolum 3) ---- */
 #define SONAR_COUNT 4
