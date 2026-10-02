@@ -310,6 +310,21 @@ def _parse_pgm(path):
     return width, height, pixels
 
 
+def _write_pgm_atomic(path, width, height, pixels):
+    """P5 PGM'i once .tmp'ye yazip yerine koyar - yazarken elektrik/surec
+    kesilse bile harita dosyasi yarim kalmaz."""
+    tmp = path + '.tmp'
+    with open(tmp, 'wb') as f:
+        f.write(f'P5\n{width} {height}\n255\n'.encode() + bytes(pixels))
+    os.replace(tmp, path)
+
+
+# Harita duzenleme (kurulum ekranindaki fircalar): PGM piksel degerleri.
+# map_saver trinary: 254 = bos, 0 = dolu (duvar), 205 = bilinmiyor.
+MAP_EDIT_VALUES = {'free': 254, 'occ': 0, 'unknown': 205}
+MAP_EDIT_MAX_RADIUS_PX = 40
+
+
 def _pgm_to_png_bytes(path):
     width, height, pixels = _parse_pgm(path)
     return _png_bytes(width, height, pixels)
@@ -1105,6 +1120,52 @@ class CafeUiServerNode(Node):
         self._map_png_cache = (mtime, png)
         return png
 
+    def edit_map(self, strokes):
+        """Kurulum ekranindaki beyaz/siyah firca: kayitli haritaya boya darbeleri.
+        strokes: [{'v': 'free'|'occ'|'unknown', 'r': yaricap (harita pikseli),
+        'pts': [[fx, fy], ...]}] - fx/fy resmin 0..1 kesirleri (PNG ve PGM ayni
+        yonde: satir 0 = ust). Once eski harita maps/yedek/'e alinir, dosya
+        atomik yazilir, Nav2 robotun su anki konumuyla yeniden baslatilir."""
+        if self.mode == 'mapping':
+            raise RuntimeError('Haritalama sürerken harita düzenlenemez')
+        info = self.map_info()
+        width, height = info.get('width', 0), info.get('height', 0)
+        if not width:
+            raise RuntimeError('kayıtlı harita yok')
+        pgm_path = os.path.join(self.maps_dir, info.get('image', 'cafe_map.pgm'))
+        _, _, pixels = _parse_pgm(pgm_path)
+        img = np.frombuffer(pixels, dtype=np.uint8).reshape(height, width).copy()
+        stamps = 0
+        for stroke in list(strokes)[:300]:
+            val = MAP_EDIT_VALUES[stroke['v']]
+            r = max(1.0, min(float(stroke['r']), MAP_EDIT_MAX_RADIUS_PX))
+            pts = [(float(fx) * width, float(fy) * height) for fx, fy in list(stroke['pts'])[:5000]]
+            if not pts:
+                continue
+            for (x0, y0), (x1, y1) in zip(pts, pts[1:] or pts):
+                steps = max(1, int(math.hypot(x1 - x0, y1 - y0) / max(1.0, r / 2.0)))
+                for i in range(steps + 1):
+                    cx = x0 + (x1 - x0) * i / steps
+                    cy = y0 + (y1 - y0) * i / steps
+                    xa, xb = max(0, int(cx - r)), min(width, int(cx + r) + 1)
+                    ya, yb = max(0, int(cy - r)), min(height, int(cy + r) + 1)
+                    if xa >= xb or ya >= yb:
+                        continue
+                    gy, gx = np.ogrid[ya:yb, xa:xb]
+                    disc = (gx + 0.5 - cx) ** 2 + (gy + 0.5 - cy) ** 2 <= r * r
+                    img[ya:yb, xa:xb][disc] = val
+                    stamps += 1
+        if not stamps:
+            raise RuntimeError('boyanacak bir şey yok')
+        pose = self._capture_slam_pose() if self.launch_mgr.is_running('nav') else None   # map->base_footprint (AMCL)
+        self._backup_current_map()
+        _write_pgm_atomic(pgm_path, width, height, img.tobytes())
+        self._map_png_cache = None
+        self.get_logger().info(f'Harita fircayla duzenlendi ({len(strokes)} darbe) - Nav2 yeni haritayla yeniden baslatiliyor.')
+        if self.launch_mgr.is_running('nav'):
+            self.start_nav_and_localize(pose)
+        return len(strokes)
+
     def has_saved_map(self):
         return os.path.isfile(os.path.join(self.maps_dir, 'cafe_map.yaml'))
 
@@ -1546,6 +1607,17 @@ class CafeUiServerNode(Node):
                     expr = d.get('expr', '')
                     node_self.request_robot_speech(text, expr if expr in ROBOT_EXPRESSIONS else '')
                     self._send_json({'result': 'ok'})
+                elif path == '/api/map_edit':
+                    # govde: {"strokes": [{"v": "free"|"occ", "r": px, "pts": [[fx, fy], ...]}]}
+                    try:
+                        n = node_self.edit_map(d['strokes'])
+                    except (KeyError, TypeError, ValueError):
+                        self._send_json({'result': 'error', 'reason': 'geçersiz fırça verisi'})
+                        return
+                    except RuntimeError as e:
+                        self._send_json({'result': 'error', 'reason': str(e)})
+                        return
+                    self._send_json({'result': 'ok', 'strokes': n})
                 elif path == '/api/set_pose':
                     # govde: {"x": m, "y": m, "yaw": rad} (harita cercevesi). yaw
                     # verilmezse/null ise robotun BILDIGI son yonelim korunur
