@@ -14,6 +14,8 @@ typedef struct {
 
 /* USART2 kesmeli (interrupt) alimini baslatir - CubeMX-uretimi huart2'yi kullanir. */
 void protocol_init(UART_HandleTypeDef *huart);
+/* PI_LINK_USART3=1 iken Pi hatti USART3'u (PC10/PC11) kurar ve tutamacini dondurur. */
+UART_HandleTypeDef *protocol_pi_uart3_init(void);
 
 /* Ana donguden her turda cagrilir: gelen byte'lari satir tampolar, tam bir
  * satir gelince parse eder (V/PING/STOP), ProtocolState'i gunceller. */

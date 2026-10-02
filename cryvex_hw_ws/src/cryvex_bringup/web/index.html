@@ -138,13 +138,24 @@
             justify-content: center;
             gap: 0;
         }
+        /* PERFORMANS (2026-10-01): Pi 5 + snap Chromium'da ekranda SUREKLI kipirdayan
+           her sey saniyede 60 tam kare cizdiriyordu -> GPU sureci tek basina ~1 cekirdek
+           (olculdu: %116 CPU) - bu Pi'de YALNIZCA GPU'da kaydirilan (transform/opacity)
+           bir animasyon bile 60 kare/sn'de pahali. Cozum: (1) sonsuz donen tum susleme
+           animasyonlari TEK bir saatten, hepsi ayni anda ve sinirli kare hiziyla ilerler
+           (bkz. JS "SUSLEME SAATI"); (2) pahali efektler ucuz esdegerleriyle degisti: blur
+           filtresi -> gradyan, box-shadow/width animasyonu -> sabit golge / transform. */
         .ambient-orb {
-            position: absolute; border-radius: 50%;
-            filter: blur(80px); opacity: 0.4;
+            position: absolute; border-radius: 50%; opacity: 0.4;
+            /* eski: filter: blur(80px) - ayni yumusak leke, filtresiz (sinir 80px disari tasar) */
+            margin: -80px;
+            will-change: transform;   /* kendi GPU katmani: bir kez cizilir, sonra kaydirilir */
             animation: orb-float 8s ease-in-out infinite alternate;
         }
-        .ambient-orb.o1 { width: 30vmin; height: 30vmin; background: rgba(0, 229, 255, 0.08); top: 20%; left: 15%; }
-        .ambient-orb.o2 { width: 25vmin; height: 25vmin; background: rgba(0, 100, 255, 0.06); bottom: 25%; right: 10%; animation-delay: -4s; }
+        .ambient-orb.o1 { width: calc(30vmin + 160px); height: calc(30vmin + 160px); top: 20%; left: 15%;
+            background: radial-gradient(circle, rgba(0, 229, 255, 0.08) 0%, rgba(0, 229, 255, 0.05) 30%, transparent 70%); }
+        .ambient-orb.o2 { width: calc(25vmin + 160px); height: calc(25vmin + 160px); bottom: 25%; right: 10%; animation-delay: -4s;
+            background: radial-gradient(circle, rgba(0, 100, 255, 0.06) 0%, rgba(0, 100, 255, 0.04) 30%, transparent 70%); }
         @keyframes orb-float {
             0% { transform: translate(0, 0) scale(1); }
             100% { transform: translate(20px, -15px) scale(1.1); }
@@ -219,20 +230,10 @@
             cursor: pointer;
             box-shadow:
                 inset 0 -4px 12px rgba(0, 0, 0, 0.08),
-                0 0 40px color-mix(in srgb, var(--eye-color) 8%, transparent),
+                0 0 48px color-mix(in srgb, var(--eye-color) 12%, transparent),
                 0 8px 32px rgba(0, 0, 0, 0.3);
             transition: height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.4s ease;
-            animation: eye-glow-breathe 5.3s ease-in-out infinite;
-        }
-        @keyframes eye-glow-breathe {
-            0%, 100% {
-                box-shadow: inset 0 -4px 12px rgba(0, 0, 0, 0.08),
-                    0 0 40px color-mix(in srgb, var(--eye-color) 8%, transparent), 0 8px 32px rgba(0, 0, 0, 0.3);
-            }
-            50% {
-                box-shadow: inset 0 -4px 12px rgba(0, 0, 0, 0.08),
-                    0 0 56px color-mix(in srgb, var(--eye-color) 16%, transparent), 0 8px 32px rgba(0, 0, 0, 0.3);
-            }
+            /* parlama "nefesi" (box-shadow animasyonu) kaldirildi - bkz. PERFORMANS notu */
         }
         @keyframes eye-poke {
             0%   { transform: scale(1, 1); }
@@ -241,7 +242,7 @@
             80%  { transform: scale(1.04, 0.97); }
             100% { transform: scale(1, 1); }
         }
-        .eye.poked { animation: eye-glow-breathe 5.3s ease-in-out infinite, eye-poke 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1; }
+        .eye.poked { animation: eye-poke 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1; }
         .iris {
             width: 62%; height: 62%; border-radius: 50%;
             /* tek renkten (--eye-color) acik merkez -> koyu kenar tonlari */
@@ -266,11 +267,12 @@
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             transition: width 0.3s, height 0.3s;
+            will-change: transform;
             animation: pupil-breathe 4.6s ease-in-out infinite;  /* hafif nefes alma hissi */
         }
-        @keyframes pupil-breathe {
-            0%, 100% { width: 44%; height: 44%; }
-            50%      { width: 40%; height: 40%; }
+        @keyframes pupil-breathe {   /* 44% -> 40% boyut = scale(0.909) */
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50%      { transform: translate(-50%, -50%) scale(0.909); }
         }
         .reflection { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, 0.92); pointer-events: none; }
         .reflection.r1 { width: 28%; height: 28%; top: 14%; left: 18%; filter: blur(0.5px); }
@@ -1561,6 +1563,32 @@
         }
         buildFrameLights();
         window.addEventListener('resize', buildFrameLights);
+
+        // ==================== SUSLEME SAATI (PERFORMANS) ====================
+        // Pi 5'teki Chromium'da (ANGLE -> V3D) her cizilen kare pahali: ekranda SUREKLI
+        // kipirdayan bir sey oldugu surece saniyede 60 kare ciziliyor, GPU sureci ~1
+        // cekirdegi yiyordu (olculdu: %116 CPU). Sonsuz donen tum susleme animasyonlari
+        // (kenar isiklari, goz bebegi nefesi, isik kureleri, nabizlar) duraklatilir ve
+        // saniyede DECOR_FPS kez HEPSI AYNI ANDA ilerletilir -> en fazla DECOR_FPS kare/sn.
+        // Ayri ayri yavaslatmak ise yaramaz: farkli anlarda guncellenirler, toplamda yine
+        // her vsync'te kare cizilir. Gorunmeyen ekran/penceredekiler (opacity:0 ile gizli)
+        // hic ilerletilmez. Tek seferlik animasyonlara (goz kirpma, durtme, gecisler)
+        // dokunulmaz - onlar akici kalir.
+        const DECOR_FPS = 20;
+        let decorLast = performance.now();
+        setInterval(() => {
+            const now = performance.now(), dt = now - decorLast;
+            decorLast = now;
+            for (const a of document.getAnimations()) {
+                const timing = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
+                if (!timing || timing.iterations !== Infinity) continue;
+                if (a.playState !== 'paused') { a.pause(); continue; }
+                const el = a.effect.target;
+                const host = el && el.closest ? el.closest('.screen, .overlay') : null;
+                if (host && !host.classList.contains('active')) continue;
+                a.currentTime = (a.currentTime || 0) + dt;
+            }
+        }, 1000 / DECOR_FPS);
 
         // ==================== OVERLAYS ====================
         // Hangi pencere hangi ekranda (bkz. CSS "EKRAN ROLLERI"): musteri pencereleri

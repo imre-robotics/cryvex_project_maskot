@@ -55,7 +55,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Bool, String
-from std_srvs.srv import Empty
+from std_srvs.srv import Empty, Trigger
 from tf2_ros import Buffer, TransformListener
 
 try:
@@ -89,6 +89,14 @@ PATROL_INTERRUPTIBLE = ('idle', 'patrol', 'wander', 'going_home', 'greet_door')
 BATTERY_LOW_V = 22.0              # stm32_bridge BATT_LOW_MV ile ayni (24 V LiFePO4)
 LOCALIZATION_MAX_STD_M = 0.5      # AMCL belirsizligi bundan buyukse "emin degil"
 LOCALIZATION_MAX_STD_DEG = 30.0
+# Nav2 acilis bekcisi (2026-10-01): Pi acilirken (Chromium + tum dugumler ayni
+# anda yuklenirken) bir lifecycle servis cevabi kaybolabiliyor; o zaman
+# lifecycle_manager sonsuza kadar takiliyor, AMCL hic acilmiyor ve robot
+# masalara GIDEMIYOR. Bekci iki yoneticiye de "aktif misin" diye sorar, bu
+# sure icinde ikisi de evet demezse Nav2'yi temizce yeniden baslatir.
+NAV2_STARTUP_TIMEOUT_S = 75.0     # Pi'de normal acilis ~20-40 sn
+NAV2_MAX_START_ATTEMPTS = 3
+NAV2_LIFECYCLE_MANAGERS = ('lifecycle_manager_localization', 'lifecycle_manager_navigation')
 HEALTH_NAMES = {'brain': 'beyin', 'stm32': 'STM32', 'lidar': 'LiDAR', 'estop': 'acil stop',
                 'bumper': 'tampon', 'battery': 'batarya', 'localization': 'konum'}
 
@@ -499,6 +507,10 @@ class CafeUiServerNode(Node):
         self._hw = {'estop': None, 'bumper': None, 'battery_v': None, 'rx': 0.0, 'info': None}
         self._amcl_std = None          # (x m, y m, yaw derece) - son AMCL belirsizligi
         self._nav_started_t = 0.0
+        self._nav_watch_gen = 0          # her Nav2 baslatmasinda artar (eski bekci kendini kapatir)
+        self._nav_boot = None            # None | ('starting', deneme) | ('failed', deneme)
+        self._nav_active_clients = {
+            m: self.create_client(Trigger, f'/{m}/is_active') for m in NAV2_LIFECYCLE_MANAGERS}
         self.create_subscription(Bool, '/estop_state', lambda m: self._hw_rx('estop', m.data), 10)
         self.create_subscription(Bool, '/bumper_state', lambda m: self._hw_rx('bumper', m.data), 10)
         self.create_subscription(BatteryState, '/battery_state',
@@ -697,7 +709,7 @@ class CafeUiServerNode(Node):
             return None   # baska bir haritaya ait (yeniden haritalandi)
         return float(d['x']), float(d['y']), float(d['yaw'])
 
-    def start_nav_and_localize(self, pose=None):
+    def start_nav_and_localize(self, pose=None, _attempt=1):
         """Nav2'yi kayitli haritayla baslatir ve AMCL hazir olunca robotun
         konumunu verir: pose (haritalama sonrasi SLAM'in son konumu) ya da
         son kaydedilen konum. Ikisi de yoksa "Robot Burada" ile elle verilir -
@@ -705,17 +717,63 @@ class CafeUiServerNode(Node):
         self.launch_mgr.start_nav(self.active_map_yaml_path())
         self._nav_started_t = time.monotonic()
         pose = pose or self.load_last_pose()
+        self._nav_watch_gen += 1
+        self._nav_boot = ('starting', _attempt)
+        threading.Thread(target=self._nav_watchdog, args=(self._nav_watch_gen, _attempt, pose),
+                         daemon=True).start()
         if pose is None:
             self.get_logger().warn('Bilinen robot konumu yok - kurulum ekranindan "Robot Burada" ile verin.')
             return
-        threading.Thread(target=self._localize_when_ready, args=(pose,), daemon=True).start()
+        threading.Thread(target=self._localize_when_ready, args=(pose, self._nav_watch_gen),
+                         daemon=True).start()
 
-    def _localize_when_ready(self, pose):
+    def _nav2_is_active(self, timeout=3.0):
+        """Iki lifecycle_manager da 'aktif' diyorsa True. Takilmis bir yonetici
+        cevap vermez - zaman asimi da 'aktif degil' sayilir."""
+        for cli in self._nav_active_clients.values():
+            if not cli.service_is_ready():
+                return False
+            fut = cli.call_async(Trigger.Request())
+            t0 = time.monotonic()
+            while not fut.done() and time.monotonic() - t0 < timeout:
+                time.sleep(0.1)
+            if not fut.done():
+                fut.cancel()
+                return False
+            res = fut.result()
+            if res is None or not res.success:
+                return False
+        return True
+
+    def _nav_watchdog(self, gen, attempt, pose):
+        log = self.get_logger()
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < NAV2_STARTUP_TIMEOUT_S:
+            if gen != self._nav_watch_gen or not self.launch_mgr.is_running('nav'):
+                return   # bu arada haritalama ya da yeni bir Nav2 baslatmasi devraldi
+            if self._nav2_is_active():
+                self._nav_boot = None
+                log.info(f'[Nav2 bekcisi] Nav2 hazir ({time.monotonic() - t0:.0f} sn, deneme {attempt}).')
+                return
+            time.sleep(2.0)
+        if gen != self._nav_watch_gen or not self.launch_mgr.is_running('nav'):
+            return
+        if attempt >= NAV2_MAX_START_ATTEMPTS:
+            self._nav_boot = ('failed', attempt)
+            log.error(f'[Nav2 bekcisi] Nav2 {attempt} denemede de acilamadi - robotu yeniden baslatin.')
+            return
+        log.warn(f'[Nav2 bekcisi] Nav2 {NAV2_STARTUP_TIMEOUT_S:.0f} sn icinde acilmadi '
+                 f'(deneme {attempt}/{NAV2_MAX_START_ATTEMPTS}) - yeniden baslatiliyor.')
+        self.start_nav_and_localize(pose, _attempt=attempt + 1)
+
+    def _localize_when_ready(self, pose, gen=None):
         # AMCL /initialpose'a abone olsa bile AKTIF olana kadar gelen konumu yok
         # sayar - bu yuzden AMCL'in cevap olarak /amcl_pose yayinladigini
         # gorene kadar tekrarlanir (Pi'de Nav2'nin acilmasi ~15-30 sn).
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline and self.launch_mgr.is_running('nav'):
+            if gen is not None and gen != self._nav_watch_gen:
+                return   # Nav2 bu arada yeniden baslatildi; konumu yeni deneme verir
             if self.initialpose_pub.get_subscription_count() > 0:
                 sent = time.monotonic()
                 try:
@@ -729,6 +787,8 @@ class CafeUiServerNode(Node):
                     return
             else:
                 time.sleep(1.0)
+        if gen is not None and gen != self._nav_watch_gen:
+            return   # yeniden baslatma sirasinda cikildi - uyari yeni denemenin isi
         self.get_logger().warn('Robot konumu AMCL\'e verilemedi (Nav2 acilmadi?) - "Robot Burada" ile verin.')
 
     def _capture_slam_pose(self):
@@ -925,6 +985,9 @@ class CafeUiServerNode(Node):
         problems = [k for k, v in h.items() if v['ok'] is False]
         h['summary'] = {'ok': not problems, 'text': 'Her şey yolunda' if not problems
                         else 'Dikkat: ' + ', '.join(HEALTH_NAMES[k] for k in problems)}
+        # Motorsuz hizli varis acik unutulmasin (patrol.py fast_arrival_seconds)
+        if (self._patrol_status or {}).get('fast_arrival'):
+            h['summary']['text'] += ' · ⚡ Motorsuz hızlı varış AÇIK'
         return h
 
     def _localization_health(self):
@@ -933,6 +996,12 @@ class CafeUiServerNode(Node):
         if not self.launch_mgr.is_running('nav'):
             return {'ok': False if self.has_saved_map() else None,
                     'text': 'konum sistemi kapalı' if self.has_saved_map() else 'harita yok'}
+        if self._nav_boot is not None:
+            phase, attempt = self._nav_boot
+            if phase == 'failed':
+                return {'ok': False, 'text': 'Nav2 AÇILAMADI · robotu yeniden başlatın'}
+            return {'ok': None, 'text': 'konum sistemi açılıyor'
+                    + (f' (yeniden deneme {attempt}/{NAV2_MAX_START_ATTEMPTS})' if attempt > 1 else '')}
         if self._amcl_rx_t < self._nav_started_t or self._amcl_std is None:
             return {'ok': False, 'text': 'KONUM BİLİNMİYOR · Kurulum → "Robot Burada"'}
         sx, sy, syaw = self._amcl_std

@@ -11,10 +11,20 @@ User=main
 # stm32_bridge/ydlidar node'larinin ZATEN CALISAN "cihaz yoksa hata logla ama
 # cokme" davranisina guvenmek daha saglam: cihaz sonradan takilirsa/hazir
 # olursa Restart=on-failure ile birkac saniyede bir yeniden dener.
+# Onceki calismadan kalan surecleri ve sahipsiz Fast DDS paylasimli bellek
+# dosyalarini temizle (bkz. cryvex_ros_cleanup.sh - 2026-10-01'de bozuk bir
+# kesif portu yuzunden robot yazilimi hic acilmamisti).
+ExecStartPre=/home/main/cryvex_hw_ws/system/cryvex_ros_cleanup.sh
 ExecStartPre=/bin/sleep 5
 ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash && source /home/main/cryvex_hw_ws/install/setup.bash && exec ros2 launch cryvex_bringup hardware_bringup.launch.py'
 Restart=on-failure
 RestartSec=3
+# Durdurma: ros2 launch'a Ctrl+C (SIGINT) gibi davran - dugumleri sirayla ve
+# temizce kapatir. Varsayilan SIGTERM'de patrol/cafe_ui_server kapanmiyor,
+# systemd 90 sn bekleyip SIGKILL'e gecince Fast DDS kilitleri bozuk kaliyordu.
+KillSignal=SIGINT
+TimeoutStopSec=20
+ExecStopPost=/home/main/cryvex_hw_ws/system/cryvex_ros_cleanup.sh
 # STM32/YDLIDAR gibi seri cihazlarla ugrasirken cikan HAL/SDK loglarini
 # journalctl -u cryvex-bringup -f ile takip edebilirsiniz.
 StandardOutput=journal

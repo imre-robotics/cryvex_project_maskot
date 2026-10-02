@@ -15,7 +15,15 @@
 # VID:PID = 0483:374b, TUM Nucleo-64 kartlarinda (F446RE dahil) SABIT ve
 # iyi bilinen bir deger - simdiden guvenle yazilabilir, gercek karti
 # gormeye gerek yok.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", SYMLINK+="cryvex_stm32", MODE="0666", GROUP="dialout"
+# 2026-10-01: bu Nucleo'nun ST-LINK seri koprusu (USB VCP) 5V kisa devresinde
+# bozuldu. STM32 artik Pi'ye DOGRUDAN UART ile bagli: STM32 USART3 PC10(TX) ->
+# Pi GPIO15/RXD (pin 10), PC11(RX) <- Pi GPIO14/TXD (pin 8), GND ortak ->
+# Pi tarafinda /dev/ttyAMA0 (seri konsol /boot/firmware/cmdline.txt'den
+# kaldirildi, serial-getty@ttyAMA0 maskelendi). Firmware: app_config.h
+# PI_LINK_USART3=1. Saglam yeni bir Nucleo takilirsa asagidaki iki satirin
+# yorumunu degistirin ve PI_LINK_USART3=0 yapin.
+#SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", SYMLINK+="cryvex_stm32", MODE="0666", GROUP="dialout"
+SUBSYSTEM=="tty", KERNEL=="ttyAMA0", SYMLINK+="cryvex_stm32", MODE="0666", GROUP="dialout"
 
 # --- YDLIDAR T-mini Plus (USB-seri koprusu) ---
 # TODO: asagidaki idVendor/idProduct SATIRI DOGRULANMADI - YDLIDAR'in kendi

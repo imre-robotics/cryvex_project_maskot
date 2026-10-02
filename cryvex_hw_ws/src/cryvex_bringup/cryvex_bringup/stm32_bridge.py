@@ -67,6 +67,12 @@ CMD_TIMEOUT_S = 0.5
 
 WHEEL_BASE_M = 0.400   # app_config.h WHEEL_BASE_MM ile AYNI TUTULMALI (yer tutucu)
 BATT_LOW_MV = 22000    # app_config.h BATT_LOW_MV ile AYNI TUTULMALI
+# Bunun altindaki okuma = batarya TAKILI DEGIL (tezgah testi: Pi/STM32 adaptorden
+# besleniyor, bolucu girisi bos -> ADC 1-3 V arasi gurultu okur). 24 V LiFePO4
+# paket 5 V'a hic inmez (BMS cok once keser). cafe_ui_server.py'deki
+# "takili degil" esigiyle (volt < 5.0) AYNI. 2026-10-01'e kadar bu ayrim yoktu:
+# bataryasiz tezgahta her acilista "BATARYA DUSUK" deyip devriyeyi durduruyordu.
+BATT_PRESENT_MV = 5000
 
 
 class Stm32Bridge(Node):
@@ -98,6 +104,7 @@ class Stm32Bridge(Node):
         self._last_estop = False
         self._last_bumper = False
         self._last_batt_low = False
+        self._batt_absent_logged = False
         self._ser = None
         self._stop_flag = False
         self._imu_ok = None   # kart READY/INFO'da bildirir; None = bilinmiyor (eski yazilim)
@@ -273,7 +280,15 @@ class Stm32Bridge(Node):
         estop_now, bumper_now = bool(estop), bool(bumper)
         self.estop_pub.publish(Bool(data=estop_now))
         self.bumper_pub.publish(Bool(data=bumper_now))
-        batt_low_now = 0 < batt_mv < BATT_LOW_MV  # batt_mv<=0 = ADC okunamadi, "dusuk" SAYMA
+        # batt_mv < BATT_PRESENT_MV = batarya takili degil / ADC okunamadi: "dusuk" SAYMA
+        batt_low_now = BATT_PRESENT_MV <= batt_mv < BATT_LOW_MV
+        if batt_mv < BATT_PRESENT_MV and not self._batt_absent_logged:
+            self.get_logger().info(
+                f'Batarya takili degil ({batt_mv} mV) - dusuk batarya korumasi devre disi '
+                '(tezgah/adaptor ile calisma).')
+            self._batt_absent_logged = True
+        elif batt_mv >= BATT_PRESENT_MV:
+            self._batt_absent_logged = False
         if (estop_now and not self._last_estop) or (bumper_now and not self._last_bumper):
             # YUKSELEN KENAR - zaten test edilmis 'stop' komutunu kullan,
             # patrol.py'de YENI hicbir kod gerekmiyor.

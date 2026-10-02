@@ -1,0 +1,24 @@
+[Unit]
+Description=Cryvex kiosk ekrani (X11 + Chromium tam ekran, durum sayfasi)
+After=cryvex-bringup.service
+Wants=cryvex-bringup.service
+# Ekran karti/framebuffer hazir olsun diye grafik hedefinden sonra baslasin.
+After=graphical.target
+
+[Service]
+Type=simple
+# 'main' - bu betikleri hazirlayan gelistirme makinesindeki kullanici adi.
+# Pi'deki GERCEK kullanici adi rpi-imager'da farkli secildiyse burayi VE
+# ExecStart'taki /home/main/... yollarini ona gore guncelleyin.
+User=main
+# Bagimsiz bir X oturumu acar (masaustu ortami YOK, sadece openbox+chromium) -
+# ':0' ekrani, fare imleci gizli (-nocursor). kiosk_session.sh xinit'in TEK
+# istemcisi - o cikarsa X de kapanir, systemd Restart=always ile yeniden acar.
+ExecStart=/usr/bin/xinit /home/main/cryvex_hw_ws/system/kiosk_session.sh -- :0 -nocursor
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

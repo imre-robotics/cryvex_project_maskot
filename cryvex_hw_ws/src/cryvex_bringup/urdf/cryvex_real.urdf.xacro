@@ -78,6 +78,36 @@
     <origin xyz="0 0 ${lidar_height}" rpy="0 0 0"/>
   </joint>
 
+  <!-- ============ 4x HC-SR04 (STM32 -> stm32_bridge -> /ultrasonic/*) ============
+       stm32_bridge her Range mesajini frame_id = sonar_{fl,fr,rl,rr}_link ile
+       yayinlar; Nav2'nin range_layer'i (nav2_params.yaml) sonari costmap'e
+       islemek icin bu cercevelere TF ister. 2026-10-01'e kadar bu linkler
+       YOKTU -> range_layer her 2.5 sn "frame does not exist" uyarip sonarlari
+       hic kullanmiyordu.
+       Yerlesim sim'de (cryvex.urdf.xacro) test edilen duzenin aynisi: ondeki
+       iki sensor +-17 derece iceri bakar, +-20 derecelik huzmeleri TAM ONDE ust
+       uste biner (kor nokta yok); arkada da ayni.
+       OLCULER YER TUTUCU: govde kurulunca sensorlerin gercek konumunu olcup
+       asagidaki 4 property'yi guncelleyin (TF yapisi degismez). -->
+  <xacro:property name="sonar_x" value="0.30"/>     <!-- merkezden one/arkaya (m) -->
+  <xacro:property name="sonar_y" value="0.13"/>     <!-- merkezden sola/saga (m) -->
+  <xacro:property name="sonar_z" value="0.10"/>     <!-- zeminden yukseklik (m) -->
+  <xacro:property name="sonar_yaw" value="0.30"/>   <!-- ice donukluk (rad, ~17 derece) -->
+
+  <xacro:macro name="sonar" params="name x y yaw">
+    <link name="sonar_${name}_link"/>
+    <joint name="base_link_to_sonar_${name}" type="fixed">
+      <parent link="base_link"/>
+      <child link="sonar_${name}_link"/>
+      <origin xyz="${x} ${y} ${sonar_z}" rpy="0 0 ${yaw}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:sonar name="fl" x="${sonar_x}"  y="${sonar_y}"  yaw="${sonar_yaw}"/>
+  <xacro:sonar name="fr" x="${sonar_x}"  y="${-sonar_y}" yaw="${-sonar_yaw}"/>
+  <xacro:sonar name="rl" x="${-sonar_x}" y="${sonar_y}"  yaw="${pi - sonar_yaw}"/>
+  <xacro:sonar name="rr" x="${-sonar_x}" y="${-sonar_y}" yaw="${-pi + sonar_yaw}"/>
+
   <!-- MPU6050 - stm32_bridge.py sadece Z ekseni acisal hizini yayinliyor,
        konum onemsiz; kart DUZ (Z yukari) monte edilmezse buraya rpy eklenmeli. -->
   <link name="imu_link"/>

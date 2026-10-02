@@ -10,7 +10,17 @@
 
 /* Yazilim surumu: acilista (ve "INFO" komutuna) READY satirinda gonderilir -
  * Pi tarafi karttaki yazilimi loglardan gorur. Her yuklemede artirin. */
-#define FW_VERSION "1.1.1"
+#define FW_VERSION "1.3.1"
+
+/* ---- Pi5 <-> STM32 haberlesme hatti (2026-10-01) ----
+ * 1: USART3 - PC10 (TX) -> Pi GPIO15/RXD (pin 10), PC11 (RX) <- Pi GPIO14/TXD
+ *    (pin 8), GND ortak. Pi tarafinda /dev/ttyAMA0 (udev: /dev/cryvex_stm32).
+ *    Sebep: bu Nucleo'nun ST-LINK seri koprusu (USART2 -> USB) 2026-10-01'deki
+ *    5V kisa devresinde bozuldu - STM32 gonderiyor ama Pi'ye hic ulasmiyor
+ *    (STM32 TX pini ve saatler SWD ile dogrulandi, saglam).
+ * 0: eski yol - USART2 (PA2/PA3) -> ST-LINK sanal seri port (USB, /dev/ttyACM0).
+ *    Yeni/saglam bir Nucleo takilirsa 0 yapin. */
+#define PI_LINK_USART3 1
 
 /* ---- Guvenlik zamanlamalari ---- */
 #define WATCHDOG_TIMEOUT_MS      200U   /* Pi5'ten bu suredir komut gelmezse DUR */
@@ -44,10 +54,20 @@
  * hiz komutlarina motor_driver.c icinde uygulanir - protokolun/Nav2'nin
  * kendi ivme sinirlarindan BAGIMSIZ, son ve evrensel guvenlik katmani. */
 #define MAX_ACCEL_MM_S2     300   /* 0.3 m/s^2 */
-/* DM556 EN hattinin gercek polaritesi (aktif-dusuk mu aktif-yuksek mi)
- * SAHADA DOGRULANMALI - cogu opto-izoleli step surucude aktif-dusuk
- * yaygindir, varsayilan olarak bu secildi. */
-#define MOTOR_EN_ACTIVE_LOW 1
+/* EN polaritesi - 2026-10-01: DM860H + ORTAK ANOT open-drain baglanti
+ * (bkz. motor_driver.c motor_pins_open_drain). DM860H kilavuzu: ENA opto LED'i
+ * YANARSA surucu DEVRE DISI, sonukse (ya da hic bagli degilse) ETKIN. Pin
+ * LOW = LED yanar = devre disi -> etkinlestirmek icin pin HIGH (birakilir):
+ * aktif-YUKSEK. (Eski 1 degeriyle DM860H motorlari hic surmezdi.) */
+#define MOTOR_EN_ACTIVE_LOW 0
+
+/* Teker yonu - 2026-10-01 tezgah testi: ayni "ileri" komutunda iki motor da
+ * (mil ucundan bakinca) AYNI yone dondu. Robotta motorlar karsilikli monte
+ * edildigi icin ileri giderken biri saat yonunde, digeri tersine donmeli ->
+ * sag teker ters cevrildi. Motorlar govdeye takilinca robot ileri komutunda
+ * geri gidiyorsa IKISINI de degistirin; donuyorsa sadece birini. */
+#define LEFT_WHEEL_DIR_INVERT  0
+#define RIGHT_WHEEL_DIR_INVERT 1
 
 /* ---- Batarya voltaj olcumu (ADC1_IN4 / PA4, direnc bolucu uzerinden) ----
  * Motor surucu ekibinin analizi: "batarya 20V'a inerse DM556 alt sinirina

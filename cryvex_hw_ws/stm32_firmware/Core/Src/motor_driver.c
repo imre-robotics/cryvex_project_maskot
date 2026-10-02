@@ -17,6 +17,7 @@ typedef struct {
     int32_t target_mm_s;
     int32_t actual_mm_s;   /* ivme rampasindan gecmis, GERCEKTEN cikisa uygulanan hiz */
     int64_t accum_um;      /* acik-cevrim odometri, mikrometre (tasmaya karsi int64) */
+    bool dir_invert;       /* montaj yonu (app_config.h *_WHEEL_DIR_INVERT) - odometriyi etkilemez */
 } WheelState;
 
 static WheelState s_left;
@@ -29,8 +30,8 @@ static void wheel_apply(WheelState *w)
     /* Yon: isaret DIR pinine, buyukluk STEP frekansina (degisken PWM) gider.
      * DIR isaret kurali (pozitif = ileri) SAHADA teker donus yonuyle
      * dogrulanmali - yanlissa bu tek satiri (GPIO_PIN_SET/RESET) degistirin. */
-    HAL_GPIO_WritePin(w->dir_port, w->dir_pin,
-                       (w->actual_mm_s >= 0) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    bool forward = (w->actual_mm_s >= 0) != w->dir_invert;
+    HAL_GPIO_WritePin(w->dir_port, w->dir_pin, forward ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
     uint32_t speed_mm_s = (uint32_t)abs(w->actual_mm_s);
     if (speed_mm_s == 0) {
@@ -51,6 +52,38 @@ static void wheel_apply(WheelState *w)
     __HAL_TIM_SET_COMPARE(w->htim, w->channel, arr / 2); /* ~%50 duty */
 }
 
+/* DM860H opto-izoleli girisleri 5 V ister (kilavuz: PUL/DIR/ENA 4.5-5 V,
+ * 7-16 mA, icte 270 ohm). Baglanti ORTAK ANOT: PUL+/DIR+/ENA+ -> Nucleo 5V,
+ * PUL-/DIR-/ENA- -> asagidaki STM32 pinleri. Pin LOW = opto LED'i yanar.
+ * CubeMX bu pinleri push-pull uretir: 3.3 V'luk HIGH, 5 V'a bagli LED'den
+ * hala ~2 mA kacirir (opto yari acik -> rastgele adim). Bu yuzden OPEN-DRAIN:
+ * HIGH = pin birakilir, LED tamamen soner. PA6/PA9/PA10/PB6/PB7 5 V
+ * toleransli (FT). Burada (kullanici kodunda) yapiliyor ki CubeMX yeniden
+ * uretiminde kaybolmasin. */
+static void motor_pins_open_drain(void)
+{
+    GPIO_InitTypeDef g = {0};
+    g.Pull = GPIO_NOPULL;
+
+    g.Mode = GPIO_MODE_OUTPUT_OD;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    g.Pin = LEFT_DIR_Pin;
+    HAL_GPIO_Init(LEFT_DIR_GPIO_Port, &g);
+    g.Pin = RIGHT_DIR_Pin;
+    HAL_GPIO_Init(RIGHT_DIR_GPIO_Port, &g);
+    g.Pin = MOTOR_EN_Pin;
+    HAL_GPIO_Init(MOTOR_EN_GPIO_Port, &g);
+
+    g.Mode = GPIO_MODE_AF_OD;
+    g.Speed = GPIO_SPEED_FREQ_HIGH;
+    g.Pin = LEFT_STEP_Pin;
+    g.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(LEFT_STEP_GPIO_Port, &g);
+    g.Pin = RIGHT_STEP_Pin;
+    g.Alternate = GPIO_AF2_TIM4;
+    HAL_GPIO_Init(RIGHT_STEP_GPIO_Port, &g);
+}
+
 static void motor_en(bool enable)
 {
     bool pin_high = MOTOR_EN_ACTIVE_LOW ? !enable : enable;
@@ -65,13 +98,22 @@ void motor_driver_init(TIM_HandleTypeDef *htim_left, TIM_HandleTypeDef *htim_rig
     s_left.channel = TIM_CHANNEL_1;
     s_left.dir_port = LEFT_DIR_GPIO_Port;
     s_left.dir_pin = LEFT_DIR_Pin;
+    s_left.dir_invert = LEFT_WHEEL_DIR_INVERT;
 
     s_right.htim = htim_right;
     s_right.channel = TIM_CHANNEL_1;
     s_right.dir_port = RIGHT_DIR_GPIO_Port;
     s_right.dir_pin = RIGHT_DIR_Pin;
+    s_right.dir_invert = RIGHT_WHEEL_DIR_INVERT;
 
     battery_init(hadc_batt);
+
+    motor_pins_open_drain();
+    /* STEP cikis kutbu ters: CCR=0 (dur) iken cikis HIGH = birakilmis -> opto
+     * sonuk, durakken surekli akim cekmez. Darbe sirasinda ~%50 doluluk ayni;
+     * DM860H kenar ile adim attigi icin kutup adim sayisini degistirmez. */
+    s_left.htim->Instance->CCER |= TIM_CCER_CC1P;
+    s_right.htim->Instance->CCER |= TIM_CCER_CC1P;
 
     HAL_TIM_PWM_Start(s_left.htim, s_left.channel);
     HAL_TIM_PWM_Start(s_right.htim, s_right.channel);

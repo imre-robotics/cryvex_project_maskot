@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 static UART_HandleTypeDef *s_huart;
+static UART_HandleTypeDef s_huart3;   /* PI_LINK_USART3: Pi hatti (bkz. app_config.h) */
 static ProtocolState s_state;
 
 #define LINE_MAX 64
@@ -30,6 +31,55 @@ void protocol_init(UART_HandleTypeDef *huart)
     memset(&s_state, 0, sizeof(s_state));
     s_rx_len = 0;
     s_line_ready = false;
+    HAL_UART_Receive_IT(s_huart, (uint8_t *)&s_rx_byte, 1);
+}
+
+/* USART3 (PC10 TX / PC11 RX, AF7) - CubeMX'te tanimli DEGIL, burada (kullanici
+ * kodunda) kurulur ki .ioc yeniden uretiminde kaybolmasin. */
+UART_HandleTypeDef *protocol_pi_uart3_init(void)
+{
+    GPIO_InitTypeDef g = {0};
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_USART3_CLK_ENABLE();
+    g.Pin = GPIO_PIN_10 | GPIO_PIN_11;
+    g.Mode = GPIO_MODE_AF_PP;
+    g.Pull = GPIO_PULLUP;            /* kablo cikarsa RX bosta HIGH kalsin (sahte bayt yok) */
+    g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    g.Alternate = GPIO_AF7_USART3;
+    HAL_GPIO_Init(GPIOC, &g);
+
+    s_huart3.Instance = USART3;
+    s_huart3.Init.BaudRate = 115200;
+    s_huart3.Init.WordLength = UART_WORDLENGTH_8B;
+    s_huart3.Init.StopBits = UART_STOPBITS_1;
+    s_huart3.Init.Parity = UART_PARITY_NONE;
+    s_huart3.Init.Mode = UART_MODE_TX_RX;
+    s_huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    s_huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+    HAL_UART_Init(&s_huart3);
+
+    HAL_NVIC_SetPriority(USART3_IRQn, 0, 0);   /* USART2 ile ayni oncelik */
+    HAL_NVIC_EnableIRQ(USART3_IRQn);
+    return &s_huart3;
+}
+
+void USART3_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&s_huart3);
+}
+
+/* UART hatasi (overrun/gurultu/cerceve): HAL alimi IPTAL eder ve kendisi yeniden
+ * BASLATMAZ. 2026-10-01'e kadar bu callback yoktu - kablolama sirasindaki tek
+ * bir elektriksel parazit STM32'yi kalici olarak "sagir" birakabiliyordu
+ * (komut gelmez -> bekci motorlari durdurur, robot yeniden baslatilana kadar
+ * surulemez). Hatayi temizle ve alimi yeniden kur. */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (s_huart == NULL || huart->Instance != s_huart->Instance) {
+        return;
+    }
+    __HAL_UART_CLEAR_OREFLAG(huart);
+    s_rx_len = 0;
     HAL_UART_Receive_IT(s_huart, (uint8_t *)&s_rx_byte, 1);
 }
 

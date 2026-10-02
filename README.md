@@ -265,10 +265,10 @@ Temel kurallar:
 
 | Bileşen | Seçim |
 |---|---|
-| Ana bilgisayar | Raspberry Pi 5 (8 GB) |
+| Ana bilgisayar | Raspberry Pi 5 (4 GB) |
 | Alt seviye denetleyici | STM32 Nucleo-F446RE |
 | LiDAR | YDLIDAR T-mini Plus (2D, 360°, 12 m) |
-| IMU | MPU6050 |
+| IMU | MPU6050 (planlı, henüz takılı değil; yazılım IMU olmadan da çalışır) |
 | Tahrik | 2× hoverboard hub motor, FOC sürücü (UART) |
 | Yakın mesafe | 4× HC-SR04 ultrasonik |
 | Güç | 24 V 30 Ah LiFePO4 |

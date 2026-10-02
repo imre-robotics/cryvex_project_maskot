@@ -630,6 +630,7 @@ class CommandListener(Node):
             'msg_composing': self.msg_composing,
             'map_ready': self.map_ready,
             'rescue_active': self.rescue_active,
+            'fast_arrival': fast_arrival_seconds() > 0,
             'delivery_order_id': self.delivery_order_id,
             'delivery_queue': [o for _, o in self.delivery_queue],
             'delivery_table': (WAYPOINTS[self.delivery_table]['isim']
@@ -707,6 +708,22 @@ def _pkg_dir(sub):
     if os.path.isdir(os.path.join(os.path.dirname(os.path.dirname(real_script)), 'web')):
         return src_dir
     return os.path.join(get_package_share_directory('cryvex_bringup'), sub)
+
+
+def fast_arrival_seconds():
+    """config/robot_settings.json -> "fast_arrival_seconds" (0/yok = KAPALI).
+
+    MOTORLAR TAKILI DEGILKEN (tanitim videosu, masa testi) robot hedefe
+    gidemez; drive() 15 sn'lik takilma + 5 kurtulma denemesiyle masa basina
+    ~107 sn beklerdi. Bu ayar > 0 iken Nav2'ye hedef gitmez, robot yerinde
+    kalir, hedefe bu kadar saniyede "varilmis" sayilir ve masadan geri
+    cekilme atlanir. MOTORLAR TAKILINCA 0 YAPIN (dosya her suruste okunur,
+    yeniden baslatma gerekmez; telefonun Robot Sagligi karti uyarir)."""
+    try:
+        with open(os.path.join(_pkg_dir('config'), 'robot_settings.json'), encoding='utf-8') as f:
+            return max(0.0, float(json.load(f).get('fast_arrival_seconds', 0) or 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0.0
 
 
 def load_waypoints_cfg():
@@ -949,6 +966,8 @@ def _depart_maneuver(listener, expected_state):
     Nav2 donusu/sonraki hedefe gidisi masaya/sandalyeye cok yakinken degil,
     acik alanda yapar. Arkada bir sey algilanirsa (10 cm) erken durur."""
     log = listener.get_logger()
+    if fast_arrival_seconds() > 0:   # motorsuz hizli varis: robot yerinde kalir
+        return
     log.info(f'[AYRILIS] {listener.current_waypoint} -> {DEPART_BACK_METERS:.0f} m geri cekiliniyor...')
     t0 = time.time()
     while time.time() - t0 < DEPART_BACK_SECONDS:
@@ -978,6 +997,20 @@ def drive(navigator, listener, target, expected_state):
     Donus: True basarili / False kesildi veya basarisiz.
     """
     log = listener.get_logger()
+
+    fast = fast_arrival_seconds()
+    if fast > 0:
+        # Motorsuz hizli varis (bkz. fast_arrival_seconds): Nav2'ye hedef
+        # gitmez, robot yerinde kalir, kisa bir "yol"dan sonra varilmis sayilir.
+        listener.current_waypoint = target['isim']
+        log.info(f"[HIZLI VARIS] {target['isim']} -> {fast:.0f} sn sonra varilmis sayilacak.")
+        t0 = time.time()
+        while time.time() - t0 < fast:
+            if listener.state != expected_state:
+                return False
+            time.sleep(0.2)
+        listener.last_pos = target
+        return listener.state == expected_state
 
     if not navigator.nav_to_pose_client.wait_for_server(timeout_sec=5.0):
         log.error(

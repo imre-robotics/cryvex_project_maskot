@@ -97,7 +97,12 @@ void app_init(UART_HandleTypeDef *huart_pi5, TIM_HandleTypeDef *htim_left_step,
 {
     const char *reset_cause = read_reset_cause();
     led_init();
+#if PI_LINK_USART3
+    (void)huart_pi5;   /* USART2/ST-LINK hatti bu kartta bozuk - bkz. app_config.h */
+    protocol_init(protocol_pi_uart3_init());
+#else
     protocol_init(huart_pi5);
+#endif
     motor_driver_init(htim_left_step, htim_right_step, hadc_batt);
     sonar_init(htim_us_clock);
     enable_sonar_exti_irqs();
