@@ -52,7 +52,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPo
 from rclpy.time import Time as RclpyTime
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Path
 from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Empty, Trigger
@@ -172,6 +172,10 @@ def _occgrid_gray(msg):
 
 SCAN_RGB = (255, 45, 45)   # LiDAR'in su an gordugu noktalar
 ROBOT_RGB = (0, 170, 255)  # robotun konumu + onunun baktigi yon (ok)
+PLAN_RGB = (255, 213, 0)   # Nav2'nin planladigi yol (telefon ana ekrani)
+MARK_RGB = {'table': (0, 229, 255), 'barista': (0, 255, 136), 'door': (255, 170, 0)}
+MARK_TEXT_RGB = (4, 18, 26)
+PLAN_FRESH_S = 20.0        # bundan eski /plan cizilmez (robot artik o yolda degil)
 GRID_RGB = np.array((0, 150, 185), dtype=np.float32)        # 1 m'lik izgara cizgileri
 GRID_LABEL_RGB = np.array((0, 100, 130), dtype=np.float32)  # kare etiketleri (A1, B1, ...)
 GRID_SCALE = 4       # izgarali resimde her harita hucresi 4x4 piksel - etiketler telefonda okunsun
@@ -216,7 +220,7 @@ def _blend(region, color, alpha, mask=None):
         region[mask] = region[mask] * (1.0 - alpha) + color * alpha
 
 
-def _live_map_png(msg, scan_xy, robot_pose, grid=True):
+def _live_map_png(msg, scan_xy, robot_pose, grid=True, marks=None, plan_xy=None, crop=False):
     """Canli harita + LiDAR'in su an gordugu noktalar (kirmizi) + robot ve onunun
     baktigi yon (mavi daire + ok). grid=True: silik 1 m'lik izgara ve kare
     etiketleri (A1, B1, ...), etiketler okunsun diye resim GRID_SCALE kat buyuk.
@@ -252,6 +256,29 @@ def _live_map_png(msg, scan_xy, robot_pose, grid=True):
         c, r = math.floor(px), math.floor(py)
         img[max(0, r - half):max(0, r + half + 1), max(0, c - half):max(0, c + half + 1)] = color
 
+    yy, xx = np.ogrid[:img_h, :img_w]
+
+    # Planlanan yol (telefon: robot nereye, hangi yoldan gidiyor)
+    if plan_xy:
+        thick = max(0, s // 3)
+        for (xa, ya), (xb, yb) in zip(plan_xy, plan_xy[1:]):
+            pa, pb = to_px(xa, ya), to_px(xb, yb)
+            n = max(1, int(math.hypot(pb[0] - pa[0], pb[1] - pa[1]) * 2))
+            for i in range(n + 1):
+                square(pa[0] + (pb[0] - pa[0]) * i / n, pa[1] + (pb[1] - pa[1]) * i / n, thick, PLAN_RGB)
+
+    # Masa / Us / Kapi isaretleri: renkli daire + numara/harf
+    for kind, label, mx, my in (marks or []):
+        cx, cy = to_px(mx, my)
+        rad = 0.22 / res * s
+        img[(xx - cx) ** 2 + (yy - cy) ** 2 <= rad ** 2] = MARK_RGB[kind]
+        fs = max(1, int(rad * 1.1 / 5))
+        mask = _text_mask(label, fs)
+        x0, y0 = int(cx - mask.shape[1] / 2), int(cy - mask.shape[0] / 2)
+        if x0 >= 0 and y0 >= 0:
+            sub = img[y0:y0 + mask.shape[0], x0:x0 + mask.shape[1]]
+            sub[mask[:sub.shape[0], :sub.shape[1]]] = MARK_TEXT_RGB
+
     scan_half = max(1, (3 * s) // 2 - 1)
     for x, y in scan_xy:
         square(*to_px(x, y), scan_half, SCAN_RGB)
@@ -259,9 +286,10 @@ def _live_map_png(msg, scan_xy, robot_pose, grid=True):
         rx, ry, yaw = robot_pose
         cx, cy = to_px(rx, ry)
         radius = 0.15 / res * s
-        yy, xx = np.ogrid[:img_h, :img_w]
         img[(xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2] = ROBOT_RGB
-        # Ok: robotun ONU (base_footprint +x = lidar 0°, URDF'te lidar dondurulmemis).
+        # Ok: robotun ONU (base_footprint +x). 2026-10-02: eskiden LiDAR'in pozu
+        # kullaniliyordu; LiDAR -128 derece donuk ve kacik takilinca ok yanlis
+        # yonu gosteriyordu - artik base_footprint (bkz. _scan_in_map).
         length, thick = 0.6 / res * s, max(0, s // 2 - 1)
         tip = (cx + length * math.cos(yaw), cy - length * math.sin(yaw))
         head = length * 0.35
@@ -270,6 +298,20 @@ def _live_map_png(msg, scan_xy, robot_pose, grid=True):
                                    (tip, yaw - math.radians(150), head)):
             for i in range(int(seg * 2) + 1):  # yarim piksel adimlarla cizgi
                 square(sx + math.cos(ang) * i / 2, sy - math.sin(ang) * i / 2, thick, ROBOT_RGB)
+    if crop:
+        # Telefon: sadece haritanin bilinen kismi (+ robot) ve 1 m pay - koca gri alan gitmesin.
+        known = np.argwhere(gray != 205)
+        if len(known):
+            r0, c0 = known.min(0)
+            r1, c1 = known.max(0)
+            if robot_pose is not None:
+                rc, rr = int((robot_pose[0] - ox) / res), int(h - (robot_pose[1] - oy) / res)
+                r0, r1, c0, c1 = min(r0, rr), max(r1, rr), min(c0, rc), max(c1, rc)
+            pad = int(1.0 / res)
+            r0, c0 = max(0, r0 - pad) * s, max(0, c0 - pad) * s
+            r1, c1 = min(h, r1 + pad + 1) * s, min(w, c1 + pad + 1) * s
+            img = np.ascontiguousarray(img[r0:r1, c0:c1])
+            img_h, img_w = img.shape[:2]
     return _png_bytes(img_w, img_h, img.tobytes(), 3)
 
 
@@ -499,6 +541,8 @@ class CafeUiServerNode(Node):
         self.create_subscription(OccupancyGrid, '/map', self._map_cb, MAP_QOS)
         self._scan_msg, self._scan_rx = None, 0.0
         self.create_subscription(LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
+        self._plan = ([], 0.0)   # Nav2 /plan: telefondaki canli haritada sari yol
+        self.create_subscription(Path, '/plan', self._plan_cb, 10)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -639,15 +683,44 @@ class CafeUiServerNode(Node):
             if scan.range_min <= r <= scan.range_max:  # NaN/inf de burada elenir
                 points.append((t.x + r * math.cos(angle), t.y + r * math.sin(angle)))
             angle += scan.angle_increment
-        return points, (t.x, t.y, yaw)
+        # Robot isareti = govde (base_footprint), LiDAR degil: LiDAR kacik/donuk takili.
+        try:
+            tb = self.tf_buffer.lookup_transform('map', 'base_footprint', RclpyTime())
+            bt, bq = tb.transform.translation, tb.transform.rotation
+            byaw = math.atan2(2.0 * (bq.w * bq.z + bq.x * bq.y), 1.0 - 2.0 * (bq.y * bq.y + bq.z * bq.z))
+            return points, (bt.x, bt.y, byaw)
+        except Exception:  # noqa: BLE001
+            return points, (t.x, t.y, yaw)
 
-    def live_map_png_bytes(self, grid=True):
+    def _plan_cb(self, msg):
+        pts = [(p.pose.position.x, p.pose.position.y) for p in msg.poses]
+        self._plan = (pts[::3] + pts[-1:] if pts else [], time.monotonic())
+
+    def _map_marks(self):
+        """Kayitli masa/Us/Kapi noktalari -> [(tur, etiket, x, y)] (haritada cizmek icin)."""
+        cfg = self.load_waypoints_cfg()
+        marks = []
+        for i, t in enumerate(cfg.get('tables') or []):
+            marks.append(('table', str(i + 1), float(t['x']), float(t['y'])))
+        if cfg.get('barista'):
+            marks.append(('barista', 'U', float(cfg['barista']['x']), float(cfg['barista']['y'])))
+        if cfg.get('door'):
+            marks.append(('door', 'K', float(cfg['door']['x']), float(cfg['door']['y'])))
+        return marks
+
+    def live_map_png_bytes(self, grid=True, marks=False, plan=False, crop=False):
         with self._lock:
             msg = self._live_map_msg
         if msg is None or msg.info.width == 0:
             return None
         points, robot = self._scan_in_map()
-        return _live_map_png(msg, points, robot, grid)
+        mk = self._map_marks() if marks and self.mode != 'mapping' else None
+        pl = None
+        if plan:
+            pts, t = self._plan
+            if pts and time.monotonic() - t < PLAN_FRESH_S and self.launch_mgr.is_running('nav'):
+                pl = pts
+        return _live_map_png(msg, points, robot, grid, mk, pl, crop)
 
     def current_robot_yaw(self):
         """Robotun bildigi yonelim (radyan, harita cercevesi): once canli
@@ -1331,6 +1404,22 @@ class CafeUiServerNode(Node):
                     self._serve_file('index.html', 'text/html; charset=utf-8')
                 elif path in ('/setup', '/setup.html'):
                     self._serve_file('setup.html', 'text/html; charset=utf-8')
+                elif path in ('/app', '/cryvex.apk'):
+                    # Telefon uygulamasinin guncel surumu: telefon tarayicisindan
+                    # http://<robot>:8080/cryvex.apk ile indirip kurulur (USB gerekmez).
+                    apk = os.path.join(node_self.web_dir, 'cryvex.apk')
+                    try:
+                        with open(apk, 'rb') as f:
+                            body = f.read()
+                    except FileNotFoundError:
+                        self.send_error(404, 'cryvex.apk yok')
+                        return
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.android.package-archive')
+                    self.send_header('Content-Disposition', 'attachment; filename="cryvex.apk"')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif path == '/api/mode':
                     self._send_json({'mode': node_self.mode, 'configured': node_self.is_configured()})
                 elif path == '/api/status':
@@ -1338,7 +1427,11 @@ class CafeUiServerNode(Node):
                 elif path == '/api/live_map.png':
                     # ?grid=0: izgarasiz, haritayla ayni boyut (setup.html kendi izgarasini cizer)
                     qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                    png = node_self.live_map_png_bytes(grid=qs.get('grid', ['1'])[0] != '0')
+                    # ?marks=1: masa/Us/Kapi isaretleri, ?plan=1: Nav2'nin planladigi yol (telefon ana ekrani)
+                    png = node_self.live_map_png_bytes(grid=qs.get('grid', ['1'])[0] != '0',
+                                                       marks=qs.get('marks', ['0'])[0] == '1',
+                                                       plan=qs.get('plan', ['0'])[0] == '1',
+                                                       crop=qs.get('crop', ['0'])[0] == '1')
                     if png is None:
                         self.send_error(503, 'Henuz canli harita yok')
                         return

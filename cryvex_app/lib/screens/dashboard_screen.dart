@@ -5,6 +5,7 @@ import '../api/robot_api.dart';
 import '../state/robot_state.dart';
 import '../theme.dart';
 import '../tts.dart';
+import '../widgets/live_map.dart';
 import '../widgets/password_sheet.dart';
 import 'connect_screen.dart';
 import 'joystick_screen.dart';
@@ -141,6 +142,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 12),
                 ],
                 _statusCard(st),
+                const SizedBox(height: 12),
+                LiveMapCard(
+                  baseUrl: st.api?.baseUrl,
+                  statusLine: st.waypoint.isNotEmpty ? 'Durum: ${st.state} · ${st.waypoint}' : 'Durum: ${st.state}',
+                ),
                 const SizedBox(height: 12),
                 if (st.orders.isNotEmpty) ...[
                   _ordersCard(st),
