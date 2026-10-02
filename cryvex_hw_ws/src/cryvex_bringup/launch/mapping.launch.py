@@ -78,6 +78,24 @@ def generate_launch_description():
             'minimum_time_interval': 0.5,
             # Canli harita (telefon/ekran) 5sn yerine 1sn'de bir guncellensin.
             'map_update_interval': 1.0,
+            # 2026-10-02: harita bozulmasinin asil nedeni. Varsayilanlarla tarama
+            # eslestirici odometriyi neredeyse hic cezalandirmiyor (0.5 m^2 / 1 rad^2
+            # varyans, aci cezasi en fazla %10) ve +-25 cm / +-20 derece pencerede en
+            # iyi benzeyen yere atliyor; sandalye/masa ayagi dolu kafede bu yanlis
+            # eslesme demek (olculdu: robot duz giderken SLAM pozu 0.05 <-> 0.87 m ve
+            # 16 derece ziplıyordu, teker + LiDAR ICP ise %3 icinde uyumluydu).
+            # Odometri artik iyi oldugu icin eslestirici ona yakin kalsin:
+            'distance_variance_penalty': 0.1,
+            'angle_variance_penalty': 0.15,
+            'minimum_distance_penalty': 0.4,
+            'minimum_angle_penalty': 0.6,
+            'correlation_search_space_dimension': 0.3,   # +-15 cm
+            'coarse_search_angle_offset': 0.175,         # +-10 derece
+            # Yanlis dongu kapatma tum grafi bukup haritayi katlar - daha secici ol.
+            'loop_match_minimum_response_coarse': 0.45,
+            'loop_match_minimum_response_fine': 0.55,
+            # 12 m'ye kadar seyrek uzak isinlar kafe icinde gurultu; 8 m yeter.
+            'max_laser_range': 8.0,
         }],
     )
 

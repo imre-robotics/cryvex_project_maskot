@@ -36,10 +36,14 @@
        ~48 cm kayiyordu; bu degerlerle ~5 cm. "On" = robotun +x yonu (STM32
        *_WHEEL_DIR_INVERT ayarina gore ileri gittigi taraf). Ekran tarafi on
        olacaksa: iki teker terslemesini de cevirin, lidar_x/lidar_y'nin isaretini
-       degistirin ve lidar_yaw'a 180 derece ekleyin (-128 -> +52). -->
-  <xacro:property name="lidar_x" value="0.104"/>
-  <xacro:property name="lidar_y" value="-0.124"/>
-  <xacro:property name="lidar_yaw" value="${radians(-128)}"/>
+       degistirin ve lidar_yaw'a 180 derece ekleyin (-123 -> +57).
+       2026-10-02 (2. olcum): temiz koridorda 0.39 m duz ileri/geri + yerinde
+       +-90 derece testi -> yaw -128 degil -123 (5 derece fark 1 m'de ~9 cm yana
+       kayma demek), konum 0.103/-0.131. Bu degerlerle teker odometrisiyle
+       tasinan iki tarama dunyada ust uste biniyor. -->
+  <xacro:property name="lidar_x" value="0.103"/>
+  <xacro:property name="lidar_y" value="-0.131"/>
+  <xacro:property name="lidar_yaw" value="${radians(-123)}"/>
 
 
   <material name="cryvex_dark">
