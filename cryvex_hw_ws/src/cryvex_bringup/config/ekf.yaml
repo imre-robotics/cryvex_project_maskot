@@ -20,10 +20,18 @@ ekf_filter_node:
 
     # ---- teker odometrisi (acik cevrim, bkz. yukaridaki NOT) ----
     odom0: /wheel/odom
+    # 2026-10-02: yon (yaw) artik dogrudan teker odometrisinin YON degerinden.
+    # Eskiden sadece donus HIZI (vyaw) kullaniliyordu; stm32_bridge hizi iki seri
+    # satir arasindaki sureye bolerek hesapliyor ve satirlar USB/UART tamponundan
+    # kumeler halinde geldigi icin hiz bir cok buyuk bir cok kucuk ziplıyordu.
+    # EKF bunu toplarken yonu kaybediyordu (olculdu: keşif sonrasi teker +41.6,
+    # EKF -37.5 derece - 79 derece fark) -> SLAM haritasi capraz cizgilerle
+    # bozuluyor, AMCL/Nav2 saciyordu. IMU takilinca: yaw'i kapatip imu0 vyaw
+    # ile birlikte odom0 vyaw kullanin (ya da odom0_differential: true).
     odom0_config: [true,  true,  false,
-                   false, false, false,
-                   true,  false, false,
                    false, false, true,
+                   true,  false, false,
+                   false, false, false,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
