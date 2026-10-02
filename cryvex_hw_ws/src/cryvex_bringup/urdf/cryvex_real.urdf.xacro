@@ -25,7 +25,7 @@
 -->
 <robot name="cryvex_real" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:property name="footprint_radius" value="0.35"/>
+  <xacro:property name="footprint_radius" value="0.30"/>  <!-- 2026-10-02: govde 52 cm daire + tasan tekerler -->
   <xacro:property name="base_height" value="0.12"/>
   <xacro:property name="lidar_height" value="0.22"/>  <!-- malzeme listesi rev.4, bolum 5: "yerden ~20-30 cm" -->
   <!-- 2026-10-02: LiDAR tabanin en yuksek noktasina, merkezden kacik ve donuk

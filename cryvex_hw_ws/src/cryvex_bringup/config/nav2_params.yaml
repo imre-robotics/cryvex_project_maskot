@@ -20,7 +20,8 @@
 #     zaten native 2D /scan yayinliyor, sim'deki 3D->2D koprusune gerek yok
 #
 # Henuz GERCEK OLCUYLE degistirilmesi gereken (sasi kurulunca):
-#   - local_costmap/global_costmap.robot_radius (0.35 - urdf ile birlikte guncelle)
+#   - (2026-10-02 YAPILDI) robot_radius 0.30: govde 52 cm capli daire, teker ortalari
+#     54 cm aralikli -> tekerler govdeden tasiyor, en dis nokta ~30 cm
 #
 # 2026-09-17: sim'e keepout_filter (masalarin gercek govde/tabla izdusumu)
 # ve speed_filter (kapi/mutfak yavaslama) eklendi ve test edildi (bkz.
@@ -199,7 +200,7 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: 0.35            # hoverboard-teker robot (~0.35 m) - urdf/cryvex_real.urdf.xacro
+      robot_radius: 0.30            # 2026-10-02 olculdu: govde 52 cm daire, tekerler 54 cm (en dis ~30 cm) - urdf/cryvex_real.urdf.xacro
                                      # icindeki footprint_radius ile AYNI TUTULMALI. Sasi kurulunca
                                      # ikisini birlikte gercek olcuyle guncelle.
       # denoise_layer tek-piksel LiDAR parazitini siler (hayalet engel / bosuna durma olmaz)
@@ -255,7 +256,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       use_sim_time: False
-      robot_radius: 0.35
+      robot_radius: 0.30
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "denoise_layer", "inflation_layer"]
