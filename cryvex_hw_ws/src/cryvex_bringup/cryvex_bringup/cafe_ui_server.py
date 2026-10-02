@@ -634,8 +634,24 @@ class CafeUiServerNode(Node):
         points, robot = self._scan_in_map()
         return _live_map_png(msg, points, robot, grid)
 
-    def set_robot_pose(self, x, y, yaw):
-        """Kurulum ekranindaki "Robot Burada": AMCL'e kaba ipucu (±0.5m, ±30°).
+    def current_robot_yaw(self):
+        """Robotun bildigi yonelim (radyan, harita cercevesi): once canli
+        map->base_footprint, yoksa config/last_pose.json, o da yoksa 0."""
+        try:
+            tf = self.tf_buffer.lookup_transform('map', 'base_footprint', RclpyTime())
+            q = tf.transform.rotation
+            return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            with open(self._last_pose_path(), encoding='utf-8') as f:
+                return float(json.load(f)['yaw'])
+        except (OSError, ValueError, KeyError, TypeError):
+            return 0.0
+
+    def set_robot_pose(self, x, y, yaw, yaw_known=False):
+        """Kurulum ekranindaki "Robot Burada": AMCL'e kaba ipucu (±0.5m, ±30°;
+        yon robotun kendi bildigi yonse ±15°).
         Tekerlek odometrisi yokken AMCL robot hareket etmedikce guncellenmez -
         bu yuzden ardindan ~5sn boyunca "hareketsiz guncelleme" istenir ve
         lidar ipucunu duvarlara oturtarak netlestirir (odom gelince de zararsiz)."""
@@ -648,7 +664,7 @@ class CafeUiServerNode(Node):
         msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
         msg.pose.covariance[0] = msg.pose.covariance[7] = 0.5 ** 2
-        msg.pose.covariance[35] = math.radians(30.0) ** 2
+        msg.pose.covariance[35] = math.radians(15.0 if yaw_known else 30.0) ** 2
         self.initialpose_pub.publish(msg)
         self.get_logger().info(f'Robot konumu ayarlandi: x={x:.2f} y={y:.2f} yaw={math.degrees(yaw):.0f}°')
         threading.Thread(target=self._refine_pose, daemon=True).start()
@@ -1531,16 +1547,25 @@ class CafeUiServerNode(Node):
                     node_self.request_robot_speech(text, expr if expr in ROBOT_EXPRESSIONS else '')
                     self._send_json({'result': 'ok'})
                 elif path == '/api/set_pose':
-                    # govde: {"x": m, "y": m, "yaw": rad} (harita cercevesi)
+                    # govde: {"x": m, "y": m, "yaw": rad} (harita cercevesi). yaw
+                    # verilmezse/null ise robotun BILDIGI son yonelim korunur
+                    # (2026-10-02: tek dokunusla "Robot Burada" - teker odometrisi
+                    # donusu dogru olcuyor, kayan sey konum; yonu her seferinde
+                    # elle vermek hem zahmetli hem de el ile verilen yon cogu
+                    # zaman robotun gercek yonunden daha kotu).
                     try:
-                        node_self.set_robot_pose(float(d['x']), float(d['y']), float(d['yaw']))
+                        x, y = float(d['x']), float(d['y'])
+                        yaw = d.get('yaw')
+                        keep = yaw is None
+                        yaw = node_self.current_robot_yaw() if keep else float(yaw)
+                        node_self.set_robot_pose(x, y, yaw, yaw_known=keep)
                     except (KeyError, TypeError, ValueError):
-                        self._send_json({'result': 'error', 'reason': 'x, y, yaw gerekli'})
+                        self._send_json({'result': 'error', 'reason': 'x, y gerekli (yaw istege bagli)'})
                         return
                     except RuntimeError as e:
                         self._send_json({'result': 'error', 'reason': str(e)})
                         return
-                    self._send_json({'result': 'ok'})
+                    self._send_json({'result': 'ok', 'yaw': yaw, 'yaw_kept': keep})
                 else:
                     # Bilinmeyen uc: eskiden yalandan "ok" donuyordu (buton
                     # calisiyor sanilirdi) - artik durustce hata.

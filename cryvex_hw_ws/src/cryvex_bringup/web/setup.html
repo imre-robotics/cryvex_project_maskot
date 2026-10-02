@@ -133,6 +133,7 @@
     <button class="btn" data-mode="door">🚪 Kapı</button>
     <button class="btn" data-mode="barista">☕ Barmen / Üs</button>
     <button class="btn" data-mode="robot">🤖 Robot Burada</button>
+    <button class="btn" data-mode="robot_dir" title="Robotun yönü de yanlışsa: önce konuma, sonra baktığı yöne dokunun">🧭 Robot + Yön</button>
     <button class="btn gray" id="btn-cancel">✕ Vazgeç</button>
 </div>
 
@@ -190,11 +191,12 @@
     }
 
     // ==================== mod / yerlestirme akisi ====================
-    const MODE_LABEL = { table: 'Masa', door: 'Kapı', barista: 'Barmen / Üs', robot: 'Robot Konumu' };
+    const MODE_LABEL = { table: 'Masa', door: 'Kapı', barista: 'Barmen / Üs', robot: 'Robot Konumu', robot_dir: 'Robot Konumu + Yön' };
     function setMode(m) {
         mode = m; pending = null;
         document.querySelectorAll('.mode-bar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-        if (m === 'robot') { hint.textContent = 'Robotun ŞU AN durduğu yere dokunun (yaklaşık olması yeter).'; hint.classList.remove('idle'); }
+        if (m === 'robot') { hint.textContent = 'Robotun ŞU AN durduğu yere dokunun (yaklaşık olması yeter). Yönü, robotun bildiği son yön olarak korunur.'; hint.classList.remove('idle'); }
+        else if (m === 'robot_dir') { hint.textContent = 'Robotun ŞU AN durduğu yere dokunun, sonra önünün baktığı yöne dokunun.'; hint.classList.remove('idle'); }
         else if (m) { hint.textContent = `${MODE_LABEL[m]} için haritada konuma dokunun.`; hint.classList.remove('idle'); }
         else { hint.textContent = 'Aşağıdan bir tür seçip haritada konuma dokunun.'; hint.classList.add('idle'); }
         render();
@@ -210,16 +212,20 @@
         if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
         const [x, y] = fracToWorld(fx, fy);
 
+        if (mode === 'robot') {
+            setRobotPose(x, y, null);   // tek dokunus: yon = robotun bildigi son yon
+            return;
+        }
         if (!pending) {
             pending = { x, y };
-            hint.textContent = mode === 'robot'
+            hint.textContent = mode === 'robot_dir'
                 ? 'Şimdi robotun ÖNÜNÜN baktığı yöne dokunun.'
                 : `Şimdi ${MODE_LABEL[mode]}'nın BAKACAĞI yöne dokunun.`;
             render();
             return;
         }
         const yaw = Math.atan2(y - pending.y, x - pending.x);
-        if (mode === 'robot') {
+        if (mode === 'robot_dir') {
             setRobotPose(pending.x, pending.y, yaw);   // aninda uygulanir, "Kaydet"i beklemez
         } else {
             addPoint(mode, pending.x, pending.y, yaw);
@@ -242,9 +248,12 @@
     async function setRobotPose(x, y, yaw) {
         robotPose = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, yaw };
         render();
-        const res = await apiPost('/api/set_pose', robotPose);
+        const body = { x: robotPose.x, y: robotPose.y };
+        if (yaw !== null && yaw !== undefined) body.yaw = yaw;   // yoksa sunucu robotun bildigi yonu kullanir
+        const res = await apiPost('/api/set_pose', body);
         if (res && res.result === 'ok') {
-            toast('✅ Robot konumu ayarlandı (AMCL güncellendi)');
+            if (typeof res.yaw === 'number') { robotPose.yaw = res.yaw; render(); }
+            toast(res.yaw_kept ? '✅ Robot konumu ayarlandı (yön korundu)' : '✅ Robot konumu ve yönü ayarlandı');
             if (liveActive) {
                 // Robot ipucunu ~5sn lidarla netlestirir; sonra mavi nokta = gercek tahmin.
                 hint.textContent = 'Kırmızı noktalar duvarların üstüne oturursa konum doğru. Oturmazsa tekrar deneyin.';
