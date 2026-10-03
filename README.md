@@ -68,7 +68,11 @@ robota **aynı ROS topic sözleşmesiyle** taşınır.
 - 🔊 **Türkçe ses:** çevrimiçiyken Azure Neural TTS (edge-tts), internet
   yoksa tamamen çevrimdışı çalışan **Piper** yedek sesi.
 - 🎮 **Operatör uygulaması (Flutter):** robotu yerel ağda otomatik bulma,
-  canlı durum, sanal joystick ve kurulum ekranı.
+  canlı durum, sanal joystick ve kurulum ekranı. Ana ekranda **canlı harita**
+  var: robot, LiDAR, Nav2'nin planladığı yol ve masalar saniyede bir güncellenir.
+- 🖌️ **Sahada harita düzenleme:** "Robot Burada" tek dokunuşla konum verilir,
+  robotun son yönü korunur. Beyaz fırça haritadaki pürüzleri siler, siyah fırça
+  duvar çizer.
 - 🧪 **İki simülatör:** hafif **Gazebo** (dizüstünde) ve fotogerçekçi
   **NVIDIA Isaac Sim 6.1** (RTX LiDAR, PhysX). İkisi de aynı ROS arayüzünü
   yayınlar.
@@ -104,9 +108,10 @@ flowchart LR
     NAV -- /cmd_vel --> BR
     LID -- /scan --> NAV
     EKF -- odom TF --> NAV
-    BR <-- "UART 115200" --> FW
-    FW -- "UART (hoverboard FOC)" --> MOT["2× hub motor"]
-    FW --- SEN["4× HC-SR04 · MPU6050<br/>acil stop · tampon"]
+    BR <-- "UART 115200<br/>USART3 ↔ ttyAMA0" --> FW
+    FW -- "STEP/DIR" --> DRV["2× DM860H"]
+    DRV --> MOT["2× NEMA 34<br/>step motor"]
+    FW --- SEN["4× HC-SR04<br/>acil stop · tampon"]
 ```
 
 ### Simülasyon (Isaac Sim + ROS 2 → Foxglove)
@@ -158,7 +163,7 @@ cryvex_ws/
 │   ├── src/cryvex_bringup/       #   Donanım başlatma, stm32_bridge, patrol, UI sunucusu
 │   ├── src/ydlidar_ros2_driver/  #   YDLIDAR T-mini Plus sürücüsü
 │   ├── stm32_firmware/           #   STM32CubeIDE projesi (HAL, C)
-│   ├── docs/                     #   Kurulum playbook'u, seri protokol, CubeMX pinleri
+│   ├── docs/                     #   Gerçek robot rehberi, kurulum playbook'u, seri protokol, CubeMX pinleri
 │   ├── system/                   #   systemd servisi, kiosk oturumu
 │   └── Dockerfile                #   Pi dışında Jazzy geliştirme ortamı
 └── cryvex_app/                   # Flutter operatör uygulaması (Android/iOS/masaüstü)
@@ -202,6 +207,9 @@ Ayrıntılar: [`src/cryvex_isaac/README.md`](src/cryvex_isaac/README.md)
 Adım adım kurulum (işletim sistemi imajı, STM32'ye yazılım yükleme, udev
 kuralları, systemd servisi, kiosk ekranı):
 [`cryvex_hw_ws/docs/kurulum_playbook.md`](cryvex_hw_ws/docs/kurulum_playbook.md)
+
+Kablolama, DIP ayarları, kalibrasyon, SLAM ayarları ve sahada çözülen sorunlar:
+**[`cryvex_hw_ws/docs/gercek_robot.md`](cryvex_hw_ws/docs/gercek_robot.md)**
 
 ```bash
 ros2 launch cryvex_bringup hardware_bringup.launch.py   # sensörler + STM32 + EKF + UI
@@ -269,12 +277,14 @@ Temel kurallar:
 | Alt seviye denetleyici | STM32 Nucleo-F446RE |
 | LiDAR | YDLIDAR T-mini Plus (2D, 360°, 12 m) |
 | IMU | MPU6050 (planlı, henüz takılı değil; yazılım IMU olmadan da çalışır) |
-| Tahrik | 2× hoverboard hub motor, FOC sürücü (UART) |
+| Tahrik | 2× DM860H step sürücü (STEP/DIR) + 2× 86HS156 NEMA 34 step motor |
+| Teker / gövde | Ø150 mm teker, teker arası 540 mm, Ø520 mm daire gövde |
 | Yakın mesafe | 4× HC-SR04 ultrasonik |
-| Güç | 24 V 30 Ah LiFePO4 |
+| Güç | 24 V 24 Ah LiFePO4 + JK BMS (tezgâhta 24 V 10 A Omron güç kaynağı) |
 | Güvenlik | Acil stop butonu + röle, tampon anahtarları |
-| Arayüz | 7" HDMI dokunmatik ekran, USB ses kartı + PAM8610 amfi |
+| Arayüz | HDMI dokunmatik ekran (kiosk; 17" planlı), USB ses kartı + PAM8610 amfi |
 
+Kablolama, DIP anahtarları ve kalibrasyon: [`cryvex_hw_ws/docs/gercek_robot.md`](cryvex_hw_ws/docs/gercek_robot.md) ·
 Pi 5 ↔ STM32 seri protokolü: [`cryvex_hw_ws/docs/stm32_protokol.md`](cryvex_hw_ws/docs/stm32_protokol.md) ·
 CubeMX pin tablosu: [`cryvex_hw_ws/docs/stm32_cubemx_ayarlari.md`](cryvex_hw_ws/docs/stm32_cubemx_ayarlari.md)
 
@@ -300,10 +310,13 @@ bağımsız olarak robotu durdurabilir:
 |---|---|
 | Gazebo simülasyonu (devriye, sipariş, mesaj, haritalama) | ✅ Çalışıyor |
 | Nav2 Jazzy'ye geçiş | ✅ Tamamlandı |
-| STM32 firmware (gerçek kartta) | ✅ Çalışıyor |
+| STM32 firmware (gerçek kartta, 1.3.4) | ✅ Çalışıyor |
+| Motorlar, teker odometrisi ve LiDAR kalibrasyonu | ✅ Tamamlandı (LiDAR'a göre ~%97 uyum) |
+| Bilgisayarsız açılış (güç verince ~40 sn'de hazır) | ✅ Çalışıyor |
 | Isaac Sim 6.1 + Foxglove | 🟡 ROS tarafı uçtan uca test edildi, GPU'da ilk çalıştırma bekliyor |
-| Operatör uygulaması (Flutter) | 🟡 Geliştiriliyor |
-| Gerçek robotta tam otonom devriye | 🔜 Motor sürücüsü ve şasi montajı bekleniyor |
+| Operatör uygulaması (Flutter, canlı harita) | 🟡 Geliştiriliyor |
+| Gerçek robotta haritalama + otonom devriye | 🟡 EKF ve SLAM düzeltildi, sahada yeniden haritalama |
+| Batarya + JK BMS pil göstergesi | 🔜 Planlandı |
 
 ---
 
