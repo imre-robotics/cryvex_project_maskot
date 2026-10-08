@@ -115,6 +115,14 @@ class RobotApi {
   /// {ok: bool, x, y, yaw, mode} - ok=false: konum sistemi kapali.
   Future<Map<String, dynamic>> robotPose() => _getJson('/api/robot_pose');
 
+  // ---- operatör şifresi (robotta saklanır, uygulamada YOK) ----
+  Future<bool> pinKontrol(String pin) async =>
+      (await _postJson('/api/pin_kontrol', {'password': pin}))['result'] == 'ok';
+  Future<Map<String, dynamic>> pinDegistir(String eski, String yeni) =>
+      _postJson('/api/pin_degistir', {'password': eski, 'yeni': yeni});
+  /// {varsayilan: bool} - şifre hâlâ fabrika değeri mi
+  Future<Map<String, dynamic>> pinDurum() => _getJson('/api/pin_durum');
+
   /// Robot bütün haritada LiDAR taramasıyla kendini arar; emin olursa konumunu
   /// kendisi düzeltir. {result, emin, uyum, ikinci, x, y, yaw, sure_s}
   Future<Map<String, dynamic>> konumBul() => _postJson('/api/konum_bul', {}, _longOp);

@@ -53,7 +53,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
     _leave();
     if (widget.mode == JoyMode.map && _started && !_mappingConcluded) {
       _mappingConcluded = true;
-      _api.cancelMapping(kStopPassword);
+      _api.cancelMapping(operatorPin);
     }
     super.dispose();
   }
@@ -99,8 +99,8 @@ class _JoystickScreenState extends State<JoystickScreen> {
     if (!mounted) return;
     setState(() => _busy = true);
     Map<String, dynamic> res = {'result': 'ok'};
-    if (widget.mode == JoyMode.map) res = await _api.startMapping(kStopPassword);
-    if (widget.mode == JoyMode.rescue) res = await _api.rescueStart(kStopPassword);
+    if (widget.mode == JoyMode.map) res = await _api.startMapping(operatorPin);
+    if (widget.mode == JoyMode.rescue) res = await _api.rescueStart(operatorPin);
     setState(() => _busy = false);
     if (res['result'] != 'ok') {
       if (mounted) {
@@ -179,7 +179,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
     } else if (widget.mode == JoyMode.control) {
       _toast('Kapatıldı (devriye otomatik başlamadı).');
     } else {
-      await _api.cancelMapping(kStopPassword);
+      await _api.cancelMapping(operatorPin);
       _toast('Haritalamadan vazgeçildi.');
       speak(_api, 'Haritalamadan vazgeçtim.');
     }
@@ -225,7 +225,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
     }
     setState(() => _busy = true);
     _leave();
-    final res = await _api.finishMapping(kStopPassword);
+    final res = await _api.finishMapping(operatorPin);
     setState(() => _busy = false);
     if (res['result'] != 'ok') {
       _toast('❌ Kaydedilemedi: ${res['reason'] ?? ''}');

@@ -1186,7 +1186,9 @@
         $('msg-ring-fg').style.strokeDasharray = RING_C;
 
         const PEOPLE = ['Masa 1','Masa 2','Masa 3','Masa 4','Masa 5','Masa 6','Masa 7','Masa 8','Garson'];
-        const STOP_PASSWORD = '1234';
+        // 2026-10-09: operator sifresi kodda DEGIL - sunucu dogrular (/api/pin_kontrol),
+        // dogru girilen sifre bu oturumda sonraki isteklerde kullanilir.
+        let operatorPin = '';
 
         // ==================== SPEECH (akıcı Türkçe) ====================
         let trVoice = null;
@@ -1724,22 +1726,27 @@
             else if (passBuf.length < 4) passBuf += b.textContent.trim();
             passRender();
             if (passBuf.length === 4) {
-                if (passBuf === STOP_PASSWORD) {
-                    closeOverlay();
-                    if (passAction === 'start_mapping') startMappingFlow();
-                    else if (passAction === 'rescue') startRescueFlow();
-                    else if (passAction === 'control') startControlFlow();
-                    else {
-                        apiCall('/api/stop_patrol');
-                        showToast('Devriye durduruldu'); setExpression('happy', 2000);
-                        speak('Devriyeyi durdurdum.');
-                    }
-                } else {
-                    $('pass-dots').classList.add('bad');
-                    setTimeout(passReset, 500);
-                }
+                const girilen = passBuf;
+                apiCall('/api/pin_kontrol', JSON.stringify({ password: girilen })).then((r) => passSonuc(girilen, r && r.result === 'ok'));
             }
         });
+        function passSonuc(girilen, dogru) {
+            if (dogru) {
+                operatorPin = girilen;
+                closeOverlay();
+                if (passAction === 'start_mapping') startMappingFlow();
+                else if (passAction === 'rescue') startRescueFlow();
+                else if (passAction === 'control') startControlFlow();
+                else {
+                    apiCall('/api/stop_patrol');
+                    showToast('Devriye durduruldu'); setExpression('happy', 2000);
+                    speak('Devriyeyi durdurdum.');
+                }
+            } else {
+                $('pass-dots').classList.add('bad');
+                setTimeout(passReset, 500);
+            }
+        }
         $('pass-cancel').addEventListener('click', closeOverlay);
 
         // ==================== ORTAMI HARİTALA / KURTAR (canlı joystick paneli) ====================
@@ -1786,7 +1793,7 @@
         // guvenlik agi olarak otomatik cancel_mapping cagirir (bkz. leaveMappingView).
         let mappingConcluded = true;
         async function startMappingFlow() {
-            const res = await apiCall('/api/start_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+            const res = await apiCall('/api/start_mapping', JSON.stringify({ password: operatorPin }));
             if (!res || res.result !== 'ok') { showToast('❌ Başlatılamadı: ' + (res && res.reason || '')); return; }
             joyMode = 'map'; applyJoyText();
             mappingConcluded = false;
@@ -1797,7 +1804,7 @@
         }
 
         async function startRescueFlow() {
-            const res = await apiCall('/api/rescue_start', JSON.stringify({ password: STOP_PASSWORD }));
+            const res = await apiCall('/api/rescue_start', JSON.stringify({ password: operatorPin }));
             if (!res || res.result !== 'ok') { showToast('❌ Başlatılamadı: ' + (res && res.reason || '')); return; }
             joyMode = 'rescue'; applyJoyText();
             showToast('Kurtarma modu başladı, robotu sürebilirsiniz.');
@@ -1859,7 +1866,7 @@
             // false doner ve TUM devriye butonlari kilitli kalir.
             if (joyMode === 'map' && !mappingConcluded) {
                 mappingConcluded = true;
-                apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+                apiCall('/api/cancel_mapping', JSON.stringify({ password: operatorPin }));
             }
             // NOT: joyStop()'tan FARKLI olarak burada rescue TAM olarak biter
             // (rescue_stop) - overlay kapanirken/degisirken robotu suresiz
@@ -1880,7 +1887,7 @@
             } else if (joyMode === 'control') {
                 showToast('Kapatıldı (devriye otomatik başlamadı).');
             } else {
-                await apiCall('/api/cancel_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+                await apiCall('/api/cancel_mapping', JSON.stringify({ password: operatorPin }));
                 showToast('Haritalamadan vazgeçildi.');
                 speak('Haritalamadan vazgeçtim.');
             }
@@ -1921,7 +1928,7 @@
             }
             showToast('Harita kaydediliyor, lütfen bekleyin...');
             leaveMappingView();
-            const res = await apiCall('/api/finish_mapping', JSON.stringify({ password: STOP_PASSWORD }));
+            const res = await apiCall('/api/finish_mapping', JSON.stringify({ password: operatorPin }));
             if (!res || res.result !== 'ok') {
                 showToast('❌ Kaydedilemedi: ' + (res && res.reason || ''));
                 mappingConcluded = false;   // haritalama hala aktif, guvenlik agini yeniden etkinlestir

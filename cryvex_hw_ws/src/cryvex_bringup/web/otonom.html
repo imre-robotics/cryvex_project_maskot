@@ -38,14 +38,15 @@
   <p class="not">Keşfet: bulunduğu yerde haritayı sıfırdan çıkarır, bitince kendiliğinden devriyeye geçer. Devriye: mevcut haritada, yakında gitmediği yerlere öncelik vererek dolaşır. DUR: hemen durur ve haritayı kaydeder.</p>
 </div>
 <script>
-  let sifre = '1234';
-  try { sifre = localStorage.getItem('cryvex_sifre') || sifre; } catch (e) {}
+  // 2026-10-09: sifre kodda degil; ilk komutta sorulur, sunucu dogrular. DUR sifresiz.
+  let sifre = '';
   async function komut(mod, yeni) {
     if (mod !== 'dur' && !confirm(mod === 'kesif' ? 'Keşif başlasın mı? (harita sıfırlanır)' : 'Devriye başlasın mı?')) return;
+    if (mod !== 'dur' && !sifre) { sifre = prompt('Operatör şifresi') || ''; if (!sifre) return; }
     const r = await fetch('/api/otonom', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: sifre, mod: mod, yeni: yeni }) });
     const j = await r.json();
-    if (j.result !== 'ok') alert('Hata: ' + (j.reason || '?'));
+    if (j.result !== 'ok') { if (j.reason === 'wrong password') sifre = ''; alert('Hata: ' + (j.reason || '?')); }
     yenile();
   }
   async function yenile() {

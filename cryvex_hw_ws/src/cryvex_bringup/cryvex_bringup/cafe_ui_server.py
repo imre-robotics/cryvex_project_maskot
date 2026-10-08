@@ -66,7 +66,30 @@ try:
 except ImportError:
     _EDGE_TTS_AVAILABLE = False
 
-OPERATOR_PASSWORD = '1234'  # index.html/Flutter app ile AYNI (sim ile tutarli)
+# 2026-10-09: operator sifresi DEPODA DEGIL (depo herkese acik). Robotta bu dosyada
+# durur (4-8 rakam); uygulamadan "Sifreyi Degistir" ile yazilir. Dosya yoksa eski
+# varsayilan gecerlidir ve uygulama degistirilmesini ister (/api/pin_durum).
+OPERATOR_PIN_DOSYA = os.path.expanduser('~/.config/cryvex/operator_pin')
+VARSAYILAN_PIN = '1234'
+
+
+def operator_pin():
+    try:
+        with open(OPERATOR_PIN_DOSYA, encoding='utf-8') as f:
+            pin = f.read().strip()
+        if re.fullmatch(r'\d{4,8}', pin):
+            return pin
+    except OSError:
+        pass
+    return VARSAYILAN_PIN
+
+
+def pin_kaydet(yeni):
+    os.makedirs(os.path.dirname(OPERATOR_PIN_DOSYA), exist_ok=True)
+    tmp = OPERATOR_PIN_DOSYA + '.tmp'
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w', encoding='utf-8') as f:
+        f.write(yeni + '\n')
+    os.replace(tmp, OPERATOR_PIN_DOSYA)
 
 MAP_QOS = QoSProfile(
     depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -1623,6 +1646,9 @@ class CafeUiServerNode(Node):
                     self._send_json({'calisiyor': node_self.otonom_calisiyor(), 'log': node_self.otonom_log()})
                 elif path == '/api/mode':
                     self._send_json({'mode': node_self.mode, 'configured': node_self.is_configured()})
+                elif path == '/api/pin_durum':
+                    # sifrenin kendisi DEGIL, sadece hala varsayilan mi
+                    self._send_json({'varsayilan': operator_pin() == VARSAYILAN_PIN})
                 elif path == '/api/status':
                     self._send_json(node_self.status_payload())
                 elif path == '/api/live_map.png':
@@ -1704,8 +1730,15 @@ class CafeUiServerNode(Node):
                 if not isinstance(d, dict):
                     d = {}
 
+                def pin_dogru():
+                    return str(d.get('password', '')) == operator_pin()
+
                 def need_password():
-                    return str(d.get('password', '')) != OPERATOR_PASSWORD
+                    # Robotun KENDI icinden gelen istekler (kiosk ekrani zaten sifreyi
+                    # sordu; ~/cryvex_araclar betikleri) sifresiz kabul edilir.
+                    if self.client_address[0].startswith('127.'):
+                        return False
+                    return not pin_dogru()
 
                 def ok(**extra):
                     self._send_json(dict(result='ok', **extra))
@@ -1851,10 +1884,10 @@ class CafeUiServerNode(Node):
                         return
                     ok(pose_captured=pose_captured)
                 elif path == '/api/otonom':
-                    if need_password():
+                    mod = str(d.get('mod', ''))
+                    if mod != 'dur' and need_password():     # DURDURMAK her zaman serbest
                         error('wrong password')
                         return
-                    mod = str(d.get('mod', ''))
                     if mod in ('kesif', 'devriye'):
                         node_self.otonom_baslat(mod, yeni=bool(d.get('yeni', False)))
                         ok()
@@ -1929,6 +1962,26 @@ class CafeUiServerNode(Node):
                         self._send_json({'result': 'error', 'reason': str(e)})
                         return
                     self._send_json({'result': 'ok', 'strokes': n})
+                elif path == '/api/pin_kontrol':
+                    # govde: {"password": "...."} - ekran/uygulama sifreyi kendisi bilmez,
+                    # buraya sorar. Yerelden gelse de GERCEKTEN kontrol edilir.
+                    if pin_dogru():
+                        ok()
+                    else:
+                        time.sleep(0.5)          # tahmin denemelerini yavaslat
+                        error('wrong password')
+                elif path == '/api/pin_degistir':
+                    # govde: {"password": eski, "yeni": "4 rakam"} (ekran ve uygulama tus takimi 4 haneli)
+                    yeni = str(d.get('yeni', ''))
+                    if not pin_dogru():
+                        time.sleep(0.5)
+                        error('eski şifre yanlış')
+                    elif not re.fullmatch(r'\d{4}', yeni):
+                        error('yeni şifre 4 rakam olmalı')
+                    else:
+                        pin_kaydet(yeni)
+                        node_self.get_logger().info('Operator sifresi degistirildi.')
+                        ok()
                 elif path == '/api/konum_bul':
                     # govde: {} - robot butun haritada LiDAR'la kendini arar (~1-3 sn).
                     try:

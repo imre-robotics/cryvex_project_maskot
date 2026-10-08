@@ -440,8 +440,16 @@ flowchart LR
 
 ## 10) HTTP arayüzü
 
-Tümü `http://<robot>:8080` altında. Haritalama ve devriye durdurma gibi kritik
-işlemler **operatör PIN'i** ister (PIN depoda yer almaz).
+Tümü `http://<robot>:8080` altında. Haritalama ve otonom sürüş gibi kritik
+işlemler **operatör PIN'i** ister.
+
+**PIN nerede:**
+- PIN **kodda yok**; robotta `~/.config/cryvex/operator_pin` dosyasında durur (izin 600).
+- Uygulamadaki **🔑 Operatör Şifresini Değiştir** ile değiştirilir.
+- Dosya yoksa fabrika değeri geçerlidir ve uygulama bunu değiştirmeyi ister.
+- Robot yüzü ve uygulama şifreyi kendileri bilmez, `/api/pin_kontrol` ile robota sorar.
+- Robotun **kendi içinden** gelen istekler (`127.0.0.1`: kiosk, `~/cryvex_araclar` betikleri) şifresiz kabul edilir.
+- **DUR** (`/api/otonom` `dur`) hiçbir zaman şifre istemez.
 
 | Uç nokta | Yöntem | Ne yapar |
 |---|---|---|
@@ -453,6 +461,8 @@ işlemler **operatör PIN'i** ister (PIN depoda yer almaz).
 | `/api/map.png` · `/api/map_info` | GET | Kayıtlı harita ve çözünürlük/orijin bilgisi |
 | `/api/map_edit` | POST | Fırça: `{"strokes":[{"v":"free"\|"occ","r":<px>,"pts":[[fx,fy],…]}]}` |
 | `/api/set_pose` | POST | Robot konumu. `yaw` verilmezse son bilinen yön korunur |
+| `/api/konum_bul` | POST | Robot bütün haritada LiDAR'la kendini arar, eminse konumunu düzeltir |
+| `/api/pin_kontrol` · `/api/pin_degistir` · `/api/pin_durum` | POST/POST/GET | Şifre doğrula · değiştir (`{password, yeni}`) · hâlâ fabrika değeri mi |
 | `/api/robot_pose` | GET | Robotun haritadaki konumu `{ok, x, y, yaw, mode}`; uygulamanın kurulum ekranı robotu bununla çizer |
 | `/api/otonom` | GET/POST | Otonom sürüş: GET `{calisiyor, log}`; POST `{"mod": "kesif"\|"devriye"\|"dur", "yeni": bool}` (PIN) |
 | `/api/waypoints` | GET/POST | Masa, üs ve kapı noktaları |

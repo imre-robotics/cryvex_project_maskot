@@ -98,7 +98,7 @@ class _OtonomScreenState extends State<OtonomScreen> {
     if (!ok || !mounted) return;
     if (!await askPassword(context, subtitle: 'Otonom sürüş için 4 haneli şifre')) return;
     setState(() => _busy = true);
-    final res = await _api.otonom(mod, kStopPassword, yeni: kesif);
+    final res = await _api.otonom(mod, operatorPin, yeni: kesif);
     if (!mounted) return;
     setState(() => _busy = false);
     _snack(res['result'] == 'ok' ? (kesif ? '🧭 Keşif başladı' : '🔁 Devriye başladı')
@@ -108,7 +108,7 @@ class _OtonomScreenState extends State<OtonomScreen> {
 
   /// DUR şifre sormaz: durdurmak her zaman tek dokunuş olmalı.
   Future<void> _stop() async {
-    final res = await _api.otonom('dur', kStopPassword);
+    final res = await _api.otonom('dur', operatorPin);
     _snack(res['result'] == 'ok' ? '⏹ Durduruldu (harita kaydediliyor)' : '❌ Durdurulamadı: ${res['reason'] ?? ''}');
     _refresh();
   }
@@ -120,7 +120,7 @@ class _OtonomScreenState extends State<OtonomScreen> {
         'Evet, kaydet');
     if (!ok || !mounted) return;
     setState(() => _busy = true);
-    final res = await _api.finishMapping(kStopPassword);
+    final res = await _api.finishMapping(operatorPin);
     if (!mounted) return;
     setState(() => _busy = false);
     if (res['result'] != 'ok') {

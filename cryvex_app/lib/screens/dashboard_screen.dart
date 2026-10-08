@@ -25,13 +25,24 @@ class DashboardScreen extends StatefulWidget {
 // Robot yüzü renk paletleri - göz/ağız/ışık parlak, yüz (arka plan) koyu
 // tonlar: açık arka planda beyaz göz akı kaybolur.
 const _brightColors = <(String, String)>[
-  ('Turkuaz', '#00d4ff'), ('Mavi', '#1fa2ff'), ('Lacivert', '#3b5bff'), ('Mor', '#a855ff'),
-  ('Pembe', '#ff5fc8'), ('Kırmızı', '#ff3355'), ('Turuncu', '#ff8a00'), ('Sarı', '#ffd500'),
-  ('Yeşil', '#00e676'), ('Beyaz', '#f2f5ff'),
+  ('Turkuaz', '#00d4ff'),
+  ('Mavi', '#1fa2ff'),
+  ('Lacivert', '#3b5bff'),
+  ('Mor', '#a855ff'),
+  ('Pembe', '#ff5fc8'),
+  ('Kırmızı', '#ff3355'),
+  ('Turuncu', '#ff8a00'),
+  ('Sarı', '#ffd500'),
+  ('Yeşil', '#00e676'),
+  ('Beyaz', '#f2f5ff'),
 ];
 const _faceColors = <(String, String)>[
-  ('Gece', '#06060e'), ('Lacivert', '#0a1030'), ('Mor', '#1a0a2e'),
-  ('Bordo', '#2a0a14'), ('Orman', '#06201a'), ('Antrasit', '#1c1c22'),
+  ('Gece', '#06060e'),
+  ('Lacivert', '#0a1030'),
+  ('Mor', '#1a0a2e'),
+  ('Bordo', '#2a0a14'),
+  ('Orman', '#06201a'),
+  ('Antrasit', '#1c1c22'),
 ];
 
 class _DashboardScreenState extends State<DashboardScreen> {
@@ -48,6 +59,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _robot.startPolling());
     _loadVolume();
     _loadTheme();
+    _pinDurumAl();
+  }
+
+  bool _pinVarsayilan = false;
+
+  Future<void> _pinDurumAl() async {
+    try {
+      final d = await _robot.api?.pinDurum();
+      if (mounted && d != null) setState(() => _pinVarsayilan = d['varsayilan'] == true);
+    } catch (_) {}
+  }
+
+  Future<void> _pinDegistir() async {
+    final eski = await pinIste(context, subtitle: 'Önce MEVCUT şifre');
+    if (eski == null || !mounted) return;
+    final yeni = await pinIste(context, subtitle: 'YENİ 4 haneli şifre', dogrula: false);
+    if (yeni == null || !mounted) return;
+    final tekrar = await pinIste(context, subtitle: 'Yeni şifreyi TEKRAR girin', dogrula: false);
+    if (tekrar == null || !mounted) return;
+    if (tekrar != yeni) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('❌ İki giriş aynı değil, şifre değişmedi')));
+      return;
+    }
+    final r = await _api.pinDegistir(eski, yeni);
+    if (!mounted) return;
+    if (r['result'] == 'ok') operatorPin = yeni;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          r['result'] == 'ok'
+              ? '🔑 Şifre değişti. Robotun ekranında da yeni şifre geçerli.'
+              : '❌ Değişmedi: ${r['reason'] ?? ''}',
+        ),
+      ),
+    );
+    _pinDurumAl();
   }
 
   Future<void> _loadTheme() async {
@@ -56,7 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _setThemeColor(String key, String hex) async {
-    setState(() => _theme = {..._theme, key: hex});   // aninda secili goster
+    setState(() => _theme = {..._theme, key: hex}); // aninda secili goster
     try {
       final res = await _api.setTheme({key: hex});
       final t = res['theme'];
@@ -74,12 +123,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final res = await _api.setTheme({'reset': true});
       final t = res['theme'];
       if (mounted && t is Map) setState(() => _theme = t.map((k, v) => MapEntry('$k', '$v')));
-    } catch (_) {/* baglanti yok - bir sonraki acilista yuklenir */}
+    } catch (_) {
+      /* baglanti yok - bir sonraki acilista yuklenir */
+    }
   }
 
   Future<void> _loadVolume() async {
     final v = await _api.getVolume();
-    if (mounted && v >= 0) setState(() { _volume = v; _volumeLoaded = true; });
+    if (mounted && v >= 0) {
+      setState(() {
+        _volume = v;
+        _volumeLoaded = true;
+      });
+    }
   }
 
   void _onVolumeChanged(double v) {
@@ -90,7 +146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    _robot.stopPolling();   // dispose'da context okunmaz (ağaçtan ayrılmış olur)
+    _robot.stopPolling(); // dispose'da context okunmaz (ağaçtan ayrılmış olur)
     _volumeDebounce?.cancel();
     super.dispose();
   }
@@ -101,7 +157,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final st = context.read<RobotState>();
     if (!st.mapReady) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('⚠ Kurulum/haritalama sürüyor, önce "Ortamı Haritala" akışını bitirin.')));
+        const SnackBar(content: Text('⚠ Kurulum/haritalama sürüyor, önce "Ortamı Haritala" akışını bitirin.')),
+      );
       return;
     }
     action();
@@ -142,12 +199,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (st.waitingForContinue) ...[
-                  _continueCard(st),
-                  const SizedBox(height: 12),
-                ],
+                if (st.waitingForContinue) ...[_continueCard(st), const SizedBox(height: 12)],
                 _statusCard(st),
                 const SizedBox(height: 12),
+                if (_pinVarsayilan) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: CryvexColors.amber.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: CryvexColors.amber.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '🔑 Operatör şifresi hâlâ fabrika ayarında. Kafede kullanmadan önce değiştirin.',
+                            style: TextStyle(color: CryvexColors.amber, fontSize: 12.5),
+                          ),
+                        ),
+                        TextButton(onPressed: _pinDegistir, child: const Text('Değiştir')),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 // Haritalama sürerken kayıtlı harita eskidir: canlı SLAM görüntüsü.
                 // Diğer her durumda robotun haritadaki yeri ve ne yaptığı.
                 if (st.mode == 'mapping')
@@ -155,42 +231,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 else
                   TakipHaritasi(api: st.api, state: st.state, hedef: st.waypoint, teslimMasa: st.deliveryTable),
                 const SizedBox(height: 12),
-                if (st.orders.isNotEmpty) ...[
-                  _ordersCard(st),
-                  const SizedBox(height: 12),
-                ],
-                if (st.health.isNotEmpty) ...[
-                  _healthCard(st),
-                  const SizedBox(height: 12),
-                ],
+                if (st.orders.isNotEmpty) ...[_ordersCard(st), const SizedBox(height: 12)],
+                if (st.health.isNotEmpty) ...[_healthCard(st), const SizedBox(height: 12)],
                 _volumeCard(),
                 const SizedBox(height: 18),
                 _sectionLabel('Devriye'),
-                _actionButton('🚀 Devriyeyi Başlat', CryvexButtonStyle.green,
-                    () => _requireMapReady(() { _api.startPatrol(); speak(_api, 'Devriyeye başlıyorum.', expr: 'alert'); })),
-                _actionButton('🚪 Karşılama (Kapıda, 3 dk)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() { _api.greetDoor(); speak(_api, 'Kapıda karşılamaya gidiyorum.', expr: 'love'); })),
-                _actionButton('🎈 Sosyalleşme (Gezinme)', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() { _api.wander(); speak(_api, 'Kafede geziniyorum.', expr: 'happy'); })),
-                _actionButton('🏠 Üsse Dön', CryvexButtonStyle.cyan,
-                    () => _requireMapReady(() { _api.goHome(); speak(_api, 'Üsse dönüyorum.'); })),
+                _actionButton(
+                  '🚀 Devriyeyi Başlat',
+                  CryvexButtonStyle.green,
+                  () => _requireMapReady(() {
+                    _api.startPatrol();
+                    speak(_api, 'Devriyeye başlıyorum.', expr: 'alert');
+                  }),
+                ),
+                _actionButton(
+                  '🚪 Karşılama (Kapıda, 3 dk)',
+                  CryvexButtonStyle.cyan,
+                  () => _requireMapReady(() {
+                    _api.greetDoor();
+                    speak(_api, 'Kapıda karşılamaya gidiyorum.', expr: 'love');
+                  }),
+                ),
+                _actionButton(
+                  '🎈 Sosyalleşme (Gezinme)',
+                  CryvexButtonStyle.cyan,
+                  () => _requireMapReady(() {
+                    _api.wander();
+                    speak(_api, 'Kafede geziniyorum.', expr: 'happy');
+                  }),
+                ),
+                _actionButton(
+                  '🏠 Üsse Dön',
+                  CryvexButtonStyle.cyan,
+                  () => _requireMapReady(() {
+                    _api.goHome();
+                    speak(_api, 'Üsse dönüyorum.');
+                  }),
+                ),
                 _actionButton('🔒 Devriyeyi Durdur', CryvexButtonStyle.red, _stopPatrol),
                 const SizedBox(height: 18),
                 _sectionLabel('Manuel'),
-                _actionButton('🆘 Kurtar (Manuel Sürüş)', CryvexButtonStyle.amber,
-                    () => _openJoystick(JoyMode.rescue)),
-                _actionButton('🕹️ Kontrol Sende', CryvexButtonStyle.cyan,
-                    () => _openJoystick(JoyMode.control)),
+                _actionButton('🆘 Kurtar (Manuel Sürüş)', CryvexButtonStyle.amber, () => _openJoystick(JoyMode.rescue)),
+                _actionButton('🕹️ Kontrol Sende', CryvexButtonStyle.cyan, () => _openJoystick(JoyMode.control)),
                 const SizedBox(height: 18),
                 _sectionLabel('Otonom'),
-                _actionButton('🤖 Otonom Sürüş (Keşfet · Devriye)', CryvexButtonStyle.green,
-                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OtonomScreen()))),
+                _actionButton(
+                  '🤖 Otonom Sürüş (Keşfet · Devriye)',
+                  CryvexButtonStyle.green,
+                  () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OtonomScreen())),
+                ),
                 const SizedBox(height: 18),
                 _sectionLabel('Kurulum'),
-                _actionButton('🗺️ Ortamı Haritala (Joystick ile)', CryvexButtonStyle.cyan,
-                    () => _openJoystick(JoyMode.map)),
-                _actionButton('🛠️ Harita Kurulumu (Masa · Üs · Kapı · Konum · Fırça)', CryvexButtonStyle.gray,
-                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const KurulumScreen()))),
+                _actionButton(
+                  '🗺️ Ortamı Haritala (Joystick ile)',
+                  CryvexButtonStyle.cyan,
+                  () => _openJoystick(JoyMode.map),
+                ),
+                _actionButton(
+                  '🛠️ Harita Kurulumu (Masa · Üs · Kapı · Konum · Fırça)',
+                  CryvexButtonStyle.gray,
+                  () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const KurulumScreen())),
+                ),
+                _actionButton('🔑 Operatör Şifresini Değiştir', CryvexButtonStyle.gray, _pinDegistir),
                 _actionButton('📺 Bu Cihazı Robotun Dev Ekranı Yap', CryvexButtonStyle.gray, _startPanelMode),
                 const SizedBox(height: 18),
                 _sectionLabel('🎨 Robotun Görünümü'),
@@ -204,15 +306,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _sectionLabel(String s) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, top: 4),
-        child: Text(s.toUpperCase(),
-            style: const TextStyle(color: CryvexColors.textMuted, fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.only(bottom: 8, top: 4),
+    child: Text(
+      s.toUpperCase(),
+      style: const TextStyle(
+        color: CryvexColors.textMuted,
+        fontSize: 11,
+        letterSpacing: 1.2,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 
   Widget _actionButton(String label, ButtonStyle style, VoidCallback onTap) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: SizedBox(width: double.infinity, child: ElevatedButton(style: style, onPressed: onTap, child: Text(label))),
-      );
+    padding: const EdgeInsets.only(bottom: 10),
+    child: SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(style: style, onPressed: onTap, child: Text(label)),
+    ),
+  );
 
   Widget _volumeCard() {
     return Container(
@@ -222,19 +334,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: CryvexColors.cardLine),
       ),
-      child: Row(children: [
-        const Icon(Icons.volume_up, color: CryvexColors.textMuted, size: 20),
-        Expanded(
-          child: Slider(
-            value: _volume.toDouble().clamp(0, 100),
-            min: 0, max: 100,
-            activeColor: CryvexColors.cyan,
-            onChanged: _volumeLoaded ? _onVolumeChanged : null,
+      child: Row(
+        children: [
+          const Icon(Icons.volume_up, color: CryvexColors.textMuted, size: 20),
+          Expanded(
+            child: Slider(
+              value: _volume.toDouble().clamp(0, 100),
+              min: 0,
+              max: 100,
+              activeColor: CryvexColors.cyan,
+              onChanged: _volumeLoaded ? _onVolumeChanged : null,
+            ),
           ),
-        ),
-        SizedBox(width: 38, child: Text('$_volume%', textAlign: TextAlign.right,
-            style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5))),
-      ]),
+          SizedBox(
+            width: 38,
+            child: Text(
+              '$_volume%',
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -244,9 +365,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Dev Ekran Modu'),
         content: const Text(
-            'Bu cihaz robotun gövdesindeki büyük dokunmatik ekran olur: menü, sipariş, mesaj ve '
-            'ayarlar burada açılır, boştayken kocaman CRYVEX yazar.\n\n'
-            'Uygulama bundan sonra hep bu modda açılır. Çıkmak için sol üst köşeye uzun basıp şifre girin.'),
+          'Bu cihaz robotun gövdesindeki büyük dokunmatik ekran olur: menü, sipariş, mesaj ve '
+          'ayarlar burada açılır, boştayken kocaman CRYVEX yazar.\n\n'
+          'Uygulama bundan sonra hep bu modda açılır. Çıkmak için sol üst köşeye uzun basıp şifre girin.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Vazgeç')),
           TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Başlat')),
@@ -272,31 +394,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: CryvexColors.cyan, width: 1.5),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('$title$table', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        Text(body, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
-        const SizedBox(height: 4),
-        const Text('Basılmadan robot yerinden kıpırdamaz.',
-            style: TextStyle(color: CryvexColors.amber, fontSize: 12)),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 72,
-          child: ElevatedButton(
-            style: CryvexButtonStyle.cyan,
-            onPressed: () async {
-              try {
-                final res = await _api.continueRobot();
-                _snack(res['result'] == 'ok' ? '▶ Robot devam ediyor' : '⚠ ${res['reason'] ?? ''}');
-              } catch (_) {
-                _snack('❌ Robota ulaşılamadı');
-              }
-            },
-            child: Text(button, textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('$title$table', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(body, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+          const SizedBox(height: 4),
+          const Text(
+            'Basılmadan robot yerinden kıpırdamaz.',
+            style: TextStyle(color: CryvexColors.amber, fontSize: 12),
           ),
-        ),
-      ]),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 72,
+            child: ElevatedButton(
+              style: CryvexButtonStyle.cyan,
+              onPressed: () async {
+                try {
+                  final res = await _api.continueRobot();
+                  _snack(res['result'] == 'ok' ? '▶ Robot devam ediyor' : '⚠ ${res['reason'] ?? ''}');
+                } catch (_) {
+                  _snack('❌ Robota ulaşılamadı');
+                }
+              },
+              child: Text(
+                button,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -320,73 +450,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
       decoration: BoxDecoration(
         color: CryvexColors.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: active.isNotEmpty ? CryvexColors.amber.withValues(alpha: 0.6) : CryvexColors.cardLine),
+        border: Border.all(
+          color: active.isNotEmpty ? CryvexColors.amber.withValues(alpha: 0.6) : CryvexColors.cardLine,
+        ),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          const Text('🧾 Siparişler', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
-          const Spacer(),
-          Text(active.isEmpty ? 'bekleyen yok' : '${active.length} bekliyor',
-              style: TextStyle(color: active.isEmpty ? CryvexColors.textMuted : CryvexColors.amber, fontSize: 12.5)),
-        ]),
-        for (final o in active) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: CryvexColors.cardLine),
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Row(children: [
-                Text('${o['table']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                Text('  · #${o['id']} · ${ago(o)}', style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12)),
-                const Spacer(),
-                Text('${formatPrice(o['total'])} ₺',
-                    style: const TextStyle(color: CryvexColors.green, fontWeight: FontWeight.w700)),
-              ]),
-              const SizedBox(height: 4),
-              Text(orderItemsText(o), style: const TextStyle(fontSize: 13.5)),
-              const SizedBox(height: 10),
-              if (o['status'] == 'preparing')
-                Row(children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      style: CryvexButtonStyle.green,
-                      onPressed: () => _orderReady(o),
-                      child: const Text('✅ Hazır – Robot Götürsün'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Text('🧾 Siparişler', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+              const Spacer(),
+              Text(
+                active.isEmpty ? 'bekleyen yok' : '${active.length} bekliyor',
+                style: TextStyle(color: active.isEmpty ? CryvexColors.textMuted : CryvexColors.amber, fontSize: 12.5),
+              ),
+            ],
+          ),
+          for (final o in active) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: CryvexColors.cardLine),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Text('${o['table']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                      Text(
+                        '  · #${o['id']} · ${ago(o)}',
+                        style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${formatPrice(o['total'])} ₺',
+                        style: const TextStyle(color: CryvexColors.green, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(orderItemsText(o), style: const TextStyle(fontSize: 13.5)),
+                  const SizedBox(height: 10),
+                  if (o['status'] == 'preparing')
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            style: CryvexButtonStyle.green,
+                            onPressed: () => _orderReady(o),
+                            child: const Text('✅ Hazır – Robot Götürsün'),
+                          ),
+                        ),
+                        TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
+                      ],
+                    )
+                  else if (o['status'] == 'ready')
+                    // Robot müşteriyle / başka teslimatla ilgileniyor: sıraya aldı,
+                    // o işten çıkar çıkmaz gelecek (patrol.py önceliği teslimat).
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '⏳ Sırada – robot işini bitirince gelecek',
+                            style: TextStyle(color: CryvexColors.amber, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
+                      ],
+                    )
+                  else
+                    const Text(
+                      '🚚 Robot götürüyor',
+                      style: TextStyle(color: CryvexColors.cyan, fontWeight: FontWeight.w600),
                     ),
-                  ),
-                  TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
-                ])
-              else if (o['status'] == 'ready')
-                // Robot müşteriyle / başka teslimatla ilgileniyor: sıraya aldı,
-                // o işten çıkar çıkmaz gelecek (patrol.py önceliği teslimat).
-                Row(children: [
-                  const Expanded(
-                    child: Text('⏳ Sırada – robot işini bitirince gelecek',
-                        style: TextStyle(color: CryvexColors.amber, fontWeight: FontWeight.w600)),
-                  ),
-                  TextButton(onPressed: () => _orderCancel(o), child: const Text('İptal')),
-                ])
-              else
-                const Text('🚚 Robot götürüyor', style: TextStyle(color: CryvexColors.cyan, fontWeight: FontWeight.w600)),
-            ]),
-          ),
-        ],
-        if (done.isNotEmpty) const SizedBox(height: 8),
-        for (final o in done)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Text(
-              '${o['status'] == 'delivered' ? '✓ teslim edildi' : '✕ iptal'} · ${o['table']} · ${orderItemsText(o)}',
-              style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+                ],
+              ),
             ),
-          ),
-      ]),
+          ],
+          if (done.isNotEmpty) const SizedBox(height: 8),
+          for (final o in done)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                '${o['status'] == 'delivered' ? '✓ teslim edildi' : '✕ iptal'} · ${o['table']} · ${orderItemsText(o)}',
+                style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -444,8 +602,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     Color dot(dynamic ok) => ok == true
         ? CryvexColors.green
         : ok == false
-            ? CryvexColors.red
-            : CryvexColors.textMuted;
+        ? CryvexColors.red
+        : CryvexColors.textMuted;
     final summary = st.health['summary'] as Map? ?? {};
     final allOk = summary['ok'] == true;
     return Container(
@@ -455,39 +613,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: allOk ? CryvexColors.cardLine : CryvexColors.red.withValues(alpha: 0.5)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Text('🩺 Robot Sağlığı', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
-          const Spacer(),
-          Flexible(
-            child: Text('${summary['text'] ?? ''}',
-                textAlign: TextAlign.right,
-                style: TextStyle(color: allOk ? CryvexColors.green : CryvexColors.red, fontSize: 12.5,
-                    fontWeight: FontWeight.w600)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('🩺 Robot Sağlığı', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  '${summary['text'] ?? ''}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: allOk ? CryvexColors.green : CryvexColors.red,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ]),
-        const SizedBox(height: 8),
-        for (final (key, icon, label) in _healthRows)
-          if (st.health[key] is Map)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: Container(width: 9, height: 9,
-                      decoration: BoxDecoration(color: dot(st.health[key]['ok']), shape: BoxShape.circle)),
-                ),
-                const SizedBox(width: 10),
-                SizedBox(width: 150, child: Text('$icon $label', style: const TextStyle(fontSize: 13))),
-                Expanded(
-                  child: Text('${st.health[key]['text']}',
-                      style: TextStyle(
+          const SizedBox(height: 8),
+          for (final (key, icon, label) in _healthRows)
+            if (st.health[key] is Map)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(color: dot(st.health[key]['ok']), shape: BoxShape.circle),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(width: 150, child: Text('$icon $label', style: const TextStyle(fontSize: 13))),
+                    Expanded(
+                      child: Text(
+                        '${st.health[key]['text']}',
+                        style: TextStyle(
                           fontSize: 13,
-                          color: st.health[key]['ok'] == false ? CryvexColors.red : CryvexColors.textMuted)),
+                          color: st.health[key]['ok'] == false ? CryvexColors.red : CryvexColors.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ]),
-            ),
-      ]),
+              ),
+        ],
+      ),
     );
   }
 
@@ -496,31 +673,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final current = (_theme[key] ?? '').toLowerCase();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5)),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final (name, hex) in palette)
-              Tooltip(
-                message: name,
-                child: GestureDetector(
-                  onTap: () => _setThemeColor(key, hex),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: Color(int.parse('FF${hex.substring(1)}', radix: 16)),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: current == hex ? Colors.white : Colors.white24,
-                        width: current == hex ? 3 : 1,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final (name, hex) in palette)
+                  Tooltip(
+                    message: name,
+                    child: GestureDetector(
+                      onTap: () => _setThemeColor(key, hex),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: Color(int.parse('FF${hex.substring(1)}', radix: 16)),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: current == hex ? Colors.white : Colors.white24,
+                            width: current == hex ? 3 : 1,
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-          ]),
-        ]),
+              ],
+            ),
+          ],
+        ),
       );
     }
 
@@ -531,16 +715,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: CryvexColors.cardLine),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        row('👁 Göz', 'eye', _brightColors),
-        row('👄 Ağız', 'mouth', _brightColors),
-        row('✨ Yürüyen ışık', 'light', _brightColors),
-        row('🙂 Yüz (arka plan)', 'face', _faceColors),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(onPressed: _resetTheme, child: const Text('↺ Varsayılan renkler')),
-        ),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          row('👁 Göz', 'eye', _brightColors),
+          row('👄 Ağız', 'mouth', _brightColors),
+          row('✨ Yürüyen ışık', 'light', _brightColors),
+          row('🙂 Yüz (arka plan)', 'face', _faceColors),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(onPressed: _resetTheme, child: const Text('↺ Varsayılan renkler')),
+          ),
+        ],
+      ),
     );
   }
 
@@ -556,37 +743,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Container(width: 10, height: 10, decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
                   st.isLive
                       ? 'Robot bağlı · ${st.ip}'
                       : (st.searching ? 'Robot ağda aranıyor…' : 'Robota ulaşılamıyor…'),
-                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
-            ),
-          ]),
+                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Row(children: [
-            Container(
-                width: 10, height: 10,
-                decoration: BoxDecoration(color: st.configured ? CryvexColors.green : CryvexColors.amber, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(st.configured ? 'Kurulum tamam · masalar tanımlı' : 'Kurulum eksik · henüz masa/harita yok',
-                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
-            ),
-          ]),
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: st.configured ? CryvexColors.green : CryvexColors.amber,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  st.configured ? 'Kurulum tamam · masalar tanımlı' : 'Kurulum eksik · henüz masa/harita yok',
+                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
           const Divider(height: 24, color: CryvexColors.cardLine),
-          Builder(builder: (_) {
-            final (ikon, metin) = durumMetni(st.state, hedef: st.waypoint, teslimMasa: st.deliveryTable);
-            return Text('$ikon $metin', style: const TextStyle(color: CryvexColors.textPrimary, fontWeight: FontWeight.w600));
-          }),
+          Builder(
+            builder: (_) {
+              final (ikon, metin) = durumMetni(st.state, hedef: st.waypoint, teslimMasa: st.deliveryTable);
+              return Text(
+                '$ikon $metin',
+                style: const TextStyle(color: CryvexColors.textPrimary, fontWeight: FontWeight.w600),
+              );
+            },
+          ),
           if (st.rescueActive)
             const Padding(
               padding: EdgeInsets.only(top: 6),
-              child: Text('🆘 Kurtarma modu aktif', style: TextStyle(color: CryvexColors.amber, fontWeight: FontWeight.w600)),
+              child: Text(
+                '🆘 Kurtarma modu aktif',
+                style: TextStyle(color: CryvexColors.amber, fontWeight: FontWeight.w600),
+              ),
             ),
         ],
       ),
