@@ -156,10 +156,10 @@ controller_server:
       min_speed_theta: 0.0
       acc_lim_x: 0.3            # malzeme listesi rev.4 bolum 7 - devrilme riski, sim ile ayni duzeltme
       acc_lim_y: 0.0
-      acc_lim_theta: 2.0
-      decel_lim_x: -0.4        # -2.0 idi, ani frende one yatmayi onlemek icin dusuruldu
+      acc_lim_theta: 1.0      # 2026-10-09: STM32 teker rampasi 300 mm/s2 -> en fazla ~1.1 rad/s2 (iz 0.54 m); 2.0 varsayinca hedefi asiyordu (olculdu: 90 komut -> 104 derece)
+      decel_lim_x: -0.3        # STM32 rampasi 0.3 m/s2'den hizli yavaslayamaz (onceden -0.4, -2.0)
       decel_lim_y: 0.0
-      decel_lim_theta: -2.5
+      decel_lim_theta: -1.0
       vx_samples: 10
       vy_samples: 5
       vtheta_samples: 15
@@ -383,8 +383,8 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     max_velocity: [0.20, 0.0, 0.6]    # 2026-10-09: yariya (DWB ile ayni)
     min_velocity: [-0.15, 0.0, -0.6]
-    max_accel: [0.3, 0.0, 2.0]
-    max_decel: [-0.4, 0.0, -2.5]
+    max_accel: [0.3, 0.0, 1.0]     # 2026-10-09: robotun gercek yetenegi (STM32 rampasi), bkz. DWB
+    max_decel: [-0.3, 0.0, -1.0]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

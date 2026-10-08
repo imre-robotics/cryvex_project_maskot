@@ -96,7 +96,7 @@ controller_server:
       angular_dist_threshold: 1.3
       forward_sampling_distance: 0.5
       rotate_to_heading_angular_vel: 0.5   # 2026-10-09: yariya
-      max_angular_accel: 2.5
+      max_angular_accel: 1.0   # 2026-10-09: STM32 rampasi ~1.1 rad/s2'ye izin veriyor
       simulate_ahead_time: 1.0
       rotate_to_goal_heading: false
       desired_linear_vel: 0.125            # 2026-10-09: yariya (0.25)
@@ -366,14 +366,14 @@ velocity_smoother:
     - -0.15
     - 0.0
     - -0.6
-    max_accel:
+    max_accel:         # 2026-10-09: robotun gercek yetenegi (STM32 rampasi)
     - 0.3
     - 0.0
-    - 2.0
+    - 1.0
     max_decel:
-    - -0.4
+    - -0.3
     - 0.0
-    - -2.5
+    - -1.0
     odom_topic: odom
     odom_duration: 0.1
     deadband_velocity:

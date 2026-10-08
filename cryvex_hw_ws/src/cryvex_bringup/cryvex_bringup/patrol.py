@@ -53,6 +53,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Range
 from std_msgs.msg import String
 from ament_index_python.packages import get_package_share_directory
@@ -81,6 +82,15 @@ SONAR_YAW = {'fl': 0.30, 'fr': -0.30, 'rl': 2.84, 'rr': -2.84}
 ESCAPE_TRIGGER = 0.10        # < 10 cm -> kurtulma manevrasi (fiziksel temas esigi)
 SONAR_STALE_SECONDS = 1.0    # bu suredir veri gelmeyen sensoru yok say
 STALL_ESCAPE_SECONDS = 15.0  # hedefe 15 sn ilerleme yoksa "kor" kurtulma
+# 2026-10-09 GECICI takilma algilama (enkoder gelene kadar): teker sayaci gonderilen
+# adimdan hesaplaniyor, robot bir seye dayaninca tekerler "gidiyor" der ama robot
+# gitmez -> konum (AMCL) kayar. LiDAR odometrisi (rf2o) gercek hareketi gorur.
+# Son TAKILMA_PENCERE_S boyunca teker ortalama TAKILMA_MIN_TEKER_V'den hizliyken
+# rf2o bunun TAKILMA_ORAN'indan azini goruyorsa takildi say, hemen kurtul.
+# rf2o cok yavas harekette yaniliyor (arkadasin 7 Ekim notu) -> alt hiz siniri.
+TAKILMA_PENCERE_S = 2.5
+TAKILMA_MIN_TEKER_V = 0.06     # m/s
+TAKILMA_ORAN = 0.35
 MAX_ESCAPES_PER_GOAL = 5
 
 # Masaya/hedefe FAZLA yanasmayi onler: kurtulmadan (fiziksel tehlike, 10 cm) AYRI,
@@ -173,6 +183,25 @@ ORDER_THANKS_SECONDS = 3.0   # siparis verildi: tesekkur ekrani gorunsun, sonra 
 class CommandListener(Node):
     """Arayuz komutlarini dinler, durumu /patrol_status (JSON) ile yayinlar."""
 
+    def _hiz_kaydet(self, liste, m):
+        now = time.time()
+        liste.append((now, abs(m.twist.twist.linear.x)))
+        while liste and now - liste[0][0] > TAKILMA_PENCERE_S + 1.0:
+            liste.pop(0)
+
+    def takildi_mi(self):
+        """Tekerler donuyor ama robot (LiDAR'a gore) gitmiyor mu? (bkz. TAKILMA_*)"""
+        now = time.time()
+        t = [v for ts, v in list(self._teker_v) if now - ts <= TAKILMA_PENCERE_S]
+        lv = [v for ts, v in list(self._lidar_v) if now - ts <= TAKILMA_PENCERE_S]
+        if len(t) < 10 or len(lv) < 5:     # veri yok (rf2o kapali vb.) -> karar verme
+            return False
+        teker, lidar = sum(t) / len(t), sum(lv) / len(lv)
+        if teker > TAKILMA_MIN_TEKER_V and lidar < TAKILMA_ORAN * teker:
+            self.get_logger().warn(f'TAKILMA: tekerler {teker:.2f} m/s donuyor, LiDAR {lidar:.2f} m/s goruyor.')
+            return True
+        return False
+
     def __init__(self):
         super().__init__('patrol_command_listener')
         self.state = STATE_IDLE
@@ -225,6 +254,10 @@ class CommandListener(Node):
         self.rescue_last_t = 0.0
 
         self.create_subscription(String, '/patrol_command', self._command_callback, 10)
+        # takilma algilama: (zaman, |teker v|) ve (zaman, |rf2o v|) son birkac sn
+        self._teker_v, self._lidar_v = [], []
+        self.create_subscription(Odometry, '/wheel/odom', lambda m: self._hiz_kaydet(self._teker_v, m), 20)
+        self.create_subscription(Odometry, '/odom_rf2o', lambda m: self._hiz_kaydet(self._lidar_v, m), 20)
         self.status_pub = self.create_publisher(String, '/patrol_status', 10)
         # Beynin KENDI manevralari (joystick, kurtarma, kurtulma, masadan
         # ayrilis) SADECE /cmd_vel'e (stm32_bridge) gider. Sim ikisine birden
@@ -1104,6 +1137,9 @@ def drive(navigator, listener, target, expected_state):
 
             if now - last_progress > STALL_ESCAPE_SECONDS:  # 15 sn takildi kaldi
                 escape_reason = 'stall'
+                break
+            if now - last_progress > TAKILMA_PENCERE_S and listener.takildi_mi():
+                escape_reason = 'takilma'               # tekerler donuyor, robot gitmiyor
                 break
             time.sleep(0.2)
 
