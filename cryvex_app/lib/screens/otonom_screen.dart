@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../api/robot_api.dart';
 import '../state/robot_state.dart';
@@ -188,8 +186,6 @@ class _OtonomScreenState extends State<OtonomScreen> {
             const SizedBox(height: 12),
             LiveMapCard(baseUrl: st.api?.baseUrl, statusLine: mapping ? 'Haritalama açık' : ''),
             const SizedBox(height: 12),
-            CameraCard(api: _api),
-            const SizedBox(height: 12),
             _logCard(),
             const SizedBox(height: 8),
             const Text(
@@ -244,86 +240,3 @@ Widget _card(Widget child) => Container(
       ),
       child: child,
     );
-
-/// Kamera + YOLO algılamanın canlı karesi (kutular ve etiketler robotta çizilir).
-/// Açılınca saniyede ~2 kare çeker; kapalıyken ağı yormaz.
-class CameraCard extends StatefulWidget {
-  const CameraCard({super.key, required this.api});
-  final RobotApi api;
-
-  @override
-  State<CameraCard> createState() => _CameraCardState();
-}
-
-class _CameraCardState extends State<CameraCard> {
-  bool _on = false;
-  Timer? _timer;
-  bool _busy = false;
-  Uint8List? _jpg;
-  String? _error;
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  void _toggle() {
-    setState(() => _on = !_on);
-    _timer?.cancel();
-    if (_on) {
-      _fetch();
-      _timer = Timer.periodic(const Duration(milliseconds: 500), (_) => _fetch());
-    }
-  }
-
-  Future<void> _fetch() async {
-    if (_busy) return;
-    _busy = true;
-    try {
-      final res = await http.get(Uri.parse(widget.api.cameraFrameUrl())).timeout(const Duration(seconds: 3));
-      if (!mounted) return;
-      setState(() {
-        if (res.statusCode == 200) {
-          _jpg = res.bodyBytes;
-          _error = null;
-        } else {
-          _error = 'Kamera henüz kare üretmedi';
-        }
-      });
-    } catch (_) {
-      if (mounted) setState(() => _error = 'Kamera/algılama çalışmıyor');
-    } finally {
-      _busy = false;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        const Text('📷 Kamera (yapay zekâ)', style: TextStyle(fontWeight: FontWeight.w700)),
-        const Spacer(),
-        Switch(value: _on, onChanged: (_) => _toggle(), activeThumbColor: CryvexColors.cyan),
-      ]),
-      if (_on)
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            color: Colors.black,
-            constraints: const BoxConstraints(minHeight: 140),
-            child: _jpg == null
-                ? Center(child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(_error ?? 'Kamera açılıyor…', style: const TextStyle(color: CryvexColors.textMuted))))
-                : Image.memory(_jpg!, gaplessPlayback: true, fit: BoxFit.contain),
-          ),
-        ),
-      if (_on && _error != null && _jpg != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text('⚠ $_error · son kare gösteriliyor', style: const TextStyle(color: CryvexColors.amber, fontSize: 12)),
-        ),
-    ]));
-  }
-}

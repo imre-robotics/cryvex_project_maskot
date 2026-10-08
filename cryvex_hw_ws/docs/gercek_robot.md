@@ -51,7 +51,7 @@ Simülasyon için ana [README](../../README.md) dosyasına, sıfırdan Pi kurulu
 | LiDAR konumu (dış kalibrasyon) | 🟡 Yeniden takıldı | 36 cm yükseklik, x 0,125 · y −0,045 · −90°; ICP ile yeniden doğrulanmalı **(8 Ekim)** |
 | EKF (odom → base_footprint) | ✅ | İleri hız tekerden, dönüş LiDAR odometrisinden (rf2o) **(8 Ekim)** |
 | SLAM (slam_toolbox) | 🟡 | Takılma/teker kayması olunca harita hâlâ dönebiliyor; çözüm enkoder + IMU |
-| Kamera + YOLO algılama | ✅ | Brio 100 + ±180° taret, YOLO11n ~6 kare/sn, canlı yayın `:8081` **(8 Ekim)** |
+| Kamera + YOLO algılama | ⏸️ Yazılımdan kapalı | Donanım takılı kalıyor; 9 Ekim'de işlemci yükü yüzünden kapatıldı. Açmak: `kamera:=true` + `nav2_otonom.yaml`'da `kamera_layer` ve çarpışma koruması `kamera` kaynağı |
 | HOME → Masa → HOME görevi | ✅ İlk başarı | 8 Ekim, masaya 35 cm, HOME'a dönüş < 1 cm **(8 Ekim)** |
 | Acil stop / tampon | ❌ Köprülü | Geçici olarak GND'ye bağlı **(8 Ekim)** |
 | Bilgisayarsız açılış | ✅ Çalışıyor | Güç verildikten ~40 sn sonra hazır |

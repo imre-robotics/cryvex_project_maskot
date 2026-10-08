@@ -139,7 +139,7 @@ local_costmap:
       plugins:
       - obstacle_layer
       - denoise_layer
-      - kamera_layer
+      # - kamera_layer   # 2026-10-09: kamera yazilimdan cikarildi (bkz. hardware_bringup kamera:=false)
       - inflation_layer
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
@@ -219,7 +219,7 @@ global_costmap:
       plugins:
       - obstacle_layer
       - denoise_layer
-      - kamera_layer
+      # - kamera_layer   # 2026-10-09: kamera yazilimdan cikarildi (bkz. hardware_bringup kamera:=false)
       - inflation_layer
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
@@ -431,7 +431,7 @@ collision_monitor:
       enabled: true
     observation_sources:
     - scan
-    - kamera
+    # - kamera   # 2026-10-09: kamera kapali - veri gelmeyen kaynak source_timeout ile robotu durdururdu
     scan:
       type: scan
       topic: scan

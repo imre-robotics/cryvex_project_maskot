@@ -94,14 +94,6 @@ class RobotApi {
   Future<Map<String, dynamic>> otonom(String mod, String password, {bool yeni = false}) =>
       _postJson('/api/otonom', {'password': password, 'mod': mod, 'yeni': yeni}, _longOp);
 
-  /// Kamera + YOLO algilamanin son karesi (algilama.py, ayri sunucu :8081).
-  /// Kamera/algilama calismiyorsa istek basarisiz olur ya da 503 doner.
-  String cameraFrameUrl() {
-    final u = Uri.parse(baseUrl);
-    return u.replace(port: 8081, path: '/kare.jpg',
-        query: '_=${DateTime.now().millisecondsSinceEpoch}').toString();
-  }
-
   /// "Robot Burada" (2D pose estimate). yaw null = robotun bildigi son yon korunur.
   Future<Map<String, dynamic>> setPose(double x, double y, [double? yaw]) =>
       _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': ?yaw});

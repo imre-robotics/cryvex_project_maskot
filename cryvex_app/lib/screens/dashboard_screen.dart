@@ -177,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     () => _openJoystick(JoyMode.control)),
                 const SizedBox(height: 18),
                 _sectionLabel('Otonom'),
-                _actionButton('🤖 Otonom Sürüş (Keşfet · Devriye · Kamera)', CryvexButtonStyle.green,
+                _actionButton('🤖 Otonom Sürüş (Keşfet · Devriye)', CryvexButtonStyle.green,
                     () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OtonomScreen()))),
                 const SizedBox(height: 18),
                 _sectionLabel('Kurulum'),

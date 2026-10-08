@@ -99,7 +99,16 @@ def generate_launch_description():
     # Nav2 engel haritasina yazar (/kamera_engeller, costmap 'kamera_layer'). Canli ekran :8081
     # Kamera/YOLO ortami (~/cryvex_ai) ya da ~/cryvex_araclar yoksa (yeni kurulum,
     # kamera takili degil) algilama atlanir; geri kalan sistem normal acilir.
+    # 2026-10-09: KAMERA YAZILIMDAN CIKARILDI (kullanici karari). Kamera ve taret
+    # motoru fiziksel olarak takili kalir ama algilama.py (YOLO + taret) varsayilan
+    # olarak BASLATILMAZ: Pi'nin islemcisi Nav2'ye kalsin, haritalama/konum zaten
+    # yalniz LiDAR'la calisiyor. Geri acmak: ros2 launch ... kamera:=true
+    # (ve nav2_otonom.yaml'da kamera_layer / collision_monitor 'kamera' kaynagi).
     from launch.actions import ExecuteProcess, LogInfo
+    from launch.conditions import IfCondition, UnlessCondition
+    declare_kamera = DeclareLaunchArgument(
+        'kamera', default_value='false',
+        description='true = kamera + YOLO algilama + taret (algilama.py) baslatilir')
     algilama_py = os.path.expanduser('~/cryvex_ai/bin/python')
     algilama_betik = os.path.expanduser('~/cryvex_araclar/algilama.py')
     if os.path.exists(algilama_py) and os.path.exists(algilama_betik):
@@ -107,9 +116,12 @@ def generate_launch_description():
             # nice 10: Pi'de ortalama yuk 10.9 olculdu (4 cekirdek), YOLO tek basina ~%50 -
             # Nav2 planlayici 1 Hz'e dusup hedef dusuruyordu. Algilama dusuk oncelikle calisir.
             cmd=['nice', '-n', '10', algilama_py, '-u', algilama_betik, '--fov', '38', '--yuk', '0.32'],
-            cwd=os.path.dirname(algilama_betik), output='screen', respawn=True, respawn_delay=5.0)
+            cwd=os.path.dirname(algilama_betik), output='screen', respawn=True, respawn_delay=5.0,
+            condition=IfCondition(LaunchConfiguration('kamera')))
     else:
         kamera_engel = LogInfo(msg='Algilama atlandi: ~/cryvex_ai veya ~/cryvex_araclar/algilama.py yok.')
+    kamera_kapali = LogInfo(msg='Kamera yazilimdan kapali (kamera:=false) - algilama/taret calismiyor.',
+                            condition=UnlessCondition(LaunchConfiguration('kamera')))
 
     cafe_ui_server = Node(
         package='cryvex_bringup',
@@ -140,7 +152,9 @@ def generate_launch_description():
         stm32_bridge,
         ydlidar_node,
         rf2o_node,
+        declare_kamera,
         kamera_engel,
+        kamera_kapali,
         ekf_node,
         cafe_ui_server,
         patrol,
