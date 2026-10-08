@@ -104,7 +104,9 @@ def generate_launch_description():
     algilama_betik = os.path.expanduser('~/cryvex_araclar/algilama.py')
     if os.path.exists(algilama_py) and os.path.exists(algilama_betik):
         kamera_engel = ExecuteProcess(
-            cmd=[algilama_py, '-u', algilama_betik, '--fov', '38', '--yuk', '0.32'],
+            # nice 10: Pi'de ortalama yuk 10.9 olculdu (4 cekirdek), YOLO tek basina ~%50 -
+            # Nav2 planlayici 1 Hz'e dusup hedef dusuruyordu. Algilama dusuk oncelikle calisir.
+            cmd=['nice', '-n', '10', algilama_py, '-u', algilama_betik, '--fov', '38', '--yuk', '0.32'],
             cwd=os.path.dirname(algilama_betik), output='screen', respawn=True, respawn_delay=5.0)
     else:
         kamera_engel = LogInfo(msg='Algilama atlandi: ~/cryvex_ai veya ~/cryvex_araclar/algilama.py yok.')

@@ -95,11 +95,11 @@ controller_server:
       primary_controller: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
       angular_dist_threshold: 1.3
       forward_sampling_distance: 0.5
-      rotate_to_heading_angular_vel: 1.0
+      rotate_to_heading_angular_vel: 0.5   # 2026-10-09: yariya
       max_angular_accel: 2.5
       simulate_ahead_time: 1.0
       rotate_to_goal_heading: false
-      desired_linear_vel: 0.25
+      desired_linear_vel: 0.125            # 2026-10-09: yariya (0.25)
       lookahead_dist: 0.6
       min_lookahead_dist: 0.35
       max_lookahead_dist: 0.9
@@ -113,7 +113,7 @@ controller_server:
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: false
       regulated_linear_scaling_min_radius: 0.9
-      regulated_linear_scaling_min_speed: 0.15
+      regulated_linear_scaling_min_speed: 0.08
       use_fixed_curvature_lookahead: false
       curvature_lookahead_dist: 1.0
       use_rotate_to_heading: false
@@ -358,14 +358,14 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: OPEN_LOOP
-    max_velocity:
-    - 0.45
+    max_velocity:      # 2026-10-09: yariya (0.45 / 1.2)
+    - 0.22
     - 0.0
-    - 1.2
+    - 0.6
     min_velocity:
     - -0.15
     - 0.0
-    - -1.0
+    - -0.6
     max_accel:
     - 0.3
     - 0.0

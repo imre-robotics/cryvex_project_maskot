@@ -93,7 +93,7 @@ APPROACH_GATE_DIST = 1.5     # sadece hedefe bu kadar YAKINKEN gecerli (koridord
 # Masadan AYRILIRKEN: donup gitmeden once duz geri cekil - masaya/sandalyeye
 # yakinken hemen donmeye/ilerlemeye calismak surtunmeye/takilmaya sebep oluyordu.
 DEPART_BACK_METERS = 1.0
-DEPART_BACK_LIN = 0.15                              # m/s
+DEPART_BACK_LIN = 0.08                              # m/s (2026-10-09: 0.15 -> 0.08, yavas devriyeyle uyumlu)
 DEPART_BACK_SECONDS = DEPART_BACK_METERS / DEPART_BACK_LIN
 
 # Kurtulma SABIT ADIMLI bir manevra (surekli itme DEGIL - o donguye giriyordu):

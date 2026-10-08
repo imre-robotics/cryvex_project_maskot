@@ -21,3 +21,10 @@ cryvex_hw_ws/cryvex_veri/haritalar/
 # Buyuk/yeniden uretilebilir modeller (bkz. cryvex_araclar/README.md)
 cryvex_hw_ws/cryvex_araclar/modeller/*.pt
 cryvex_hw_ws/cryvex_araclar/modeller/MobileNetSSD_*
+# Robot uzerinde calisirken olusan durum dosyalari (cryvex_araclar)
+cryvex_hw_ws/cryvex_araclar/nesneler.json
+cryvex_hw_ws/cryvex_araclar/tarete_konum.json
+cryvex_hw_ws/cryvex_araclar/gezgin_bekliyor
+cryvex_hw_ws/cryvex_araclar/govde_eski/
+cryvex_hw_ws/cryvex_araclar/*.eski.json
+.lgd-nfy*
