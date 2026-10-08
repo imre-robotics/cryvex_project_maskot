@@ -113,7 +113,7 @@ void main() {
       await g.moveBy(const Offset(40, 0));
       await g.up();
       await tester.pump();
-      await tester.tap(find.text('Haritaya Uygula'));
+      await tester.tap(find.textContaining('haritaya kaydet'));
       await tester.pump(const Duration(milliseconds: 300));
       final darbeler = robot.posts['/api/map_edit']!['strokes'] as List;
       expect(darbeler, hasLength(1));

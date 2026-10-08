@@ -38,6 +38,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
   @override
   void initState() {
     super.initState();
+    _api = context.read<RobotState>().api!;
     // _startFlow() sifre penceresi (showModalBottomSheet) acabiliyor - bunu
     // initState() TAMAMLANMADAN cagirmak "dependOnInheritedWidgetOfExactType
     // called before initState() completed" hatasi veriyor (context henuz agaca
@@ -57,7 +58,10 @@ class _JoystickScreenState extends State<JoystickScreen> {
     super.dispose();
   }
 
-  RobotApi get _api => context.read<RobotState>().api!;
+  // initState'te alınır: dispose() içinde (_leave -> teleopStop, cancelMapping)
+  // context okumak "deactivated widget's ancestor" hatası verir ve DUR komutu
+  // gitmeyebilir.
+  late final RobotApi _api;
 
   Map<String, String> get _text => switch (widget.mode) {
         JoyMode.map => const {

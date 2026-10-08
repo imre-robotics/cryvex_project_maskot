@@ -5,7 +5,9 @@ import '../api/robot_api.dart';
 import '../state/robot_state.dart';
 import '../theme.dart';
 import '../tts.dart';
+import '../durum.dart';
 import '../widgets/live_map.dart';
+import '../widgets/takip_haritasi.dart';
 import '../widgets/password_sheet.dart';
 import 'connect_screen.dart';
 import 'joystick_screen.dart';
@@ -33,6 +35,7 @@ const _faceColors = <(String, String)>[
 ];
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  late final RobotState _robot;
   int _volume = 50;
   bool _volumeLoaded = false;
   Timer? _volumeDebounce;
@@ -41,7 +44,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<RobotState>().startPolling());
+    _robot = context.read<RobotState>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _robot.startPolling());
     _loadVolume();
     _loadTheme();
   }
@@ -86,7 +90,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    context.read<RobotState>().stopPolling();
+    _robot.stopPolling();   // dispose'da context okunmaz (ağaçtan ayrılmış olur)
     _volumeDebounce?.cancel();
     super.dispose();
   }
@@ -144,10 +148,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
                 _statusCard(st),
                 const SizedBox(height: 12),
-                LiveMapCard(
-                  baseUrl: st.api?.baseUrl,
-                  statusLine: st.waypoint.isNotEmpty ? 'Durum: ${st.state} · ${st.waypoint}' : 'Durum: ${st.state}',
-                ),
+                // Haritalama sürerken kayıtlı harita eskidir: canlı SLAM görüntüsü.
+                // Diğer her durumda robotun haritadaki yeri ve ne yaptığı.
+                if (st.mode == 'mapping')
+                  LiveMapCard(baseUrl: st.api?.baseUrl, statusLine: 'Haritalama sürüyor')
+                else
+                  TakipHaritasi(api: st.api, state: st.state, hedef: st.waypoint, teslimMasa: st.deliveryTable),
                 const SizedBox(height: 12),
                 if (st.orders.isNotEmpty) ...[
                   _ordersCard(st),
@@ -553,11 +559,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
             const SizedBox(width: 8),
-            Text(
-                st.isLive
-                    ? 'Robot bağlı · ${st.ip}'
-                    : (st.searching ? 'Robot ağda aranıyor…' : 'Robota ulaşılamıyor…'),
-                style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+            Flexible(
+              child: Text(
+                  st.isLive
+                      ? 'Robot bağlı · ${st.ip}'
+                      : (st.searching ? 'Robot ağda aranıyor…' : 'Robota ulaşılamıyor…'),
+                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+            ),
           ]),
           const SizedBox(height: 8),
           Row(children: [
@@ -565,12 +573,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 width: 10, height: 10,
                 decoration: BoxDecoration(color: st.configured ? CryvexColors.green : CryvexColors.amber, shape: BoxShape.circle)),
             const SizedBox(width: 8),
-            Text(st.configured ? 'Kurulum tamam · masalar tanımlı' : 'Kurulum eksik · henüz masa/harita yok',
-                style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+            Flexible(
+              child: Text(st.configured ? 'Kurulum tamam · masalar tanımlı' : 'Kurulum eksik · henüz masa/harita yok',
+                  style: const TextStyle(color: CryvexColors.textMuted, fontSize: 13)),
+            ),
           ]),
           const Divider(height: 24, color: CryvexColors.cardLine),
-          Text('Durum: ${st.state}', style: const TextStyle(color: CryvexColors.textPrimary, fontWeight: FontWeight.w600)),
-          if (st.waypoint.isNotEmpty) Text(st.waypoint, style: const TextStyle(color: CryvexColors.textMuted, fontSize: 12.5)),
+          Builder(builder: (_) {
+            final (ikon, metin) = durumMetni(st.state, hedef: st.waypoint, teslimMasa: st.deliveryTable);
+            return Text('$ikon $metin', style: const TextStyle(color: CryvexColors.textPrimary, fontWeight: FontWeight.w600));
+          }),
           if (st.rescueActive)
             const Padding(
               padding: EdgeInsets.only(top: 6),

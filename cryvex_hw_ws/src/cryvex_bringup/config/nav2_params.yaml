@@ -38,8 +38,12 @@
 amcl:
   ros__parameters:
     use_sim_time: False
-    alpha1: 0.2
-    alpha2: 0.2
+    # 2026-10-09: sahada AMCL yonu 38 derece kaymis olculdu (tarama-harita eslestirme),
+    # teker ile EKF (rf2o) yonu oturum boyunca 128 derece ayrismisti -> donus odometrisine
+    # daha az guven (alpha1: donusten gelen donus gurultusu) ki parcaciklar yayilip
+    # LiDAR dogru yonu bulabilsin.
+    alpha1: 0.5
+    alpha2: 0.3
     alpha3: 0.2
     alpha4: 0.2
     alpha5: 0.2
@@ -68,8 +72,8 @@ amcl:
     sigma_hit: 0.2
     tf_broadcast: true
     transform_tolerance: 1.0
-    update_min_a: 0.2
-    update_min_d: 0.25
+    update_min_a: 0.1     # 2026-10-09: 0.2 -> donerken daha sik duzelt
+    update_min_d: 0.15    # 0.25 -> yavas (0.20 m/s) devriyeye uygun
     z_hit: 0.5
     z_max: 0.05
     z_rand: 0.5

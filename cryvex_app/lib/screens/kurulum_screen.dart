@@ -442,28 +442,43 @@ class _KurulumScreenState extends State<KurulumScreen> {
     );
   }
 
+  /// Fırça seçenekleri iki satırda: telefonda (393 pt) tek satıra sığmıyordu,
+  /// "Haritaya Uygula" ekranın dışında kalıyordu.
   Widget _fircaCubugu() => Padding(
-    padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
-    child: Row(
+    padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final cm in [15.0, 30.0, 60.0])
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: ChoiceChip(
-              label: Text('${cm.round()} cm'),
-              selected: _fircaCm == cm,
-              onSelected: (_) => setState(() => _fircaCm = cm),
-            ),
-          ),
-        const Spacer(),
-        IconButton(
-          tooltip: 'Geri al',
-          onPressed: _darbeler.isEmpty ? null : () => setState(() => _darbeler.removeLast()),
-          icon: const Icon(Icons.undo),
+        Wrap(
+          spacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text('Fırça kalınlığı:', style: TextStyle(color: CryvexColors.textMuted, fontSize: 12.5)),
+            for (final cm in [15.0, 30.0, 60.0])
+              ChoiceChip(
+                visualDensity: VisualDensity.compact,
+                label: Text('${cm.round()} cm'),
+                selected: _fircaCm == cm,
+                onSelected: (_) => setState(() => _fircaCm = cm),
+              ),
+          ],
         ),
-        FilledButton(
-          onPressed: _darbeler.isEmpty || _mesgul ? null : _boyayiUygula,
-          child: const Text('Haritaya Uygula'),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _darbeler.isEmpty ? null : () => setState(() => _darbeler.removeLast()),
+              icon: const Icon(Icons.undo, size: 18),
+              label: const Text('Geri al'),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: FilledButton(
+                onPressed: _darbeler.isEmpty || _mesgul ? null : _boyayiUygula,
+                child: Text(_darbeler.isEmpty ? 'Haritaya boyayın' : '💾 Boyayı haritaya kaydet (${_darbeler.length})'),
+              ),
+            ),
+          ],
         ),
       ],
     ),

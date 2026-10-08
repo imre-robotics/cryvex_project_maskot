@@ -767,7 +767,12 @@ class CafeUiServerNode(Node):
             return None
         t, q = tf.transform.translation, tf.transform.rotation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        return {'x': round(t.x, 3), 'y': round(t.y, 3), 'yaw': round(yaw, 4)}
+        pose = {'x': round(t.x, 3), 'y': round(t.y, 3), 'yaw': round(yaw, 4)}
+        # Nav2'nin su an izledigi yol (bkz. _plan_cb); 5 sn'den eskiyse gosterme.
+        plan = getattr(self, '_plan', None)
+        if plan and plan[0] and time.monotonic() - plan[1] < 5.0:
+            pose['plan'] = [[round(px, 2), round(py, 2)] for px, py in plan[0][:150]]
+        return pose
 
     def set_robot_pose(self, x, y, yaw, yaw_known=False):
         """Kurulum ekranindaki "Robot Burada": AMCL'e kaba ipucu (±0.5m, ±30°;
@@ -1211,6 +1216,8 @@ class CafeUiServerNode(Node):
                         info['image'] = val
             w, h, _ = _parse_pgm(os.path.join(self.maps_dir, info['image']))
             info['width'], info['height'] = w, h
+            # Uygulama haritanin degistigini (yeniden haritalama, firca) bununla anlar.
+            info['stamp'] = os.path.getmtime(os.path.join(self.maps_dir, info['image']))
         except Exception:  # noqa: BLE001
             info['width'] = info['height'] = 0
         return info

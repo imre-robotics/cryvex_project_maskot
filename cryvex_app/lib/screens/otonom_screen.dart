@@ -23,6 +23,7 @@ class OtonomScreen extends StatefulWidget {
 }
 
 class _OtonomScreenState extends State<OtonomScreen> {
+  late final RobotState _robot;
   Timer? _timer;
   bool _running = false;
   bool _reachable = true;
@@ -33,7 +34,7 @@ class _OtonomScreenState extends State<OtonomScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<RobotState>().startPolling();   // mode (mapping/navigation) icin
+    _robot = context.read<RobotState>()..startPolling();   // mode (mapping/navigation) icin
     _refresh();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
   }
@@ -41,7 +42,7 @@ class _OtonomScreenState extends State<OtonomScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    context.read<RobotState>().stopPolling();
+    _robot.stopPolling();   // dispose'da context okunmaz (ağaçtan ayrılmış olur)
     _logScroll.dispose();
     super.dispose();
   }
