@@ -15,7 +15,10 @@ import math
 import cv2
 import numpy as np
 
-UYUM_ESIK_M = 0.10          # nokta duvara bu kadar yakinsa "oturdu"
+# Nokta duvara bu kadar yakinsa "oturdu". Sahada olculdu (2026-10-09): 15 cm'de dogru
+# konum %96, 10 cm/3 derece kayma %82, 25 cm/8 derece %63, gercek kayip %49. 10 cm
+# esikte zararsiz birkac cm'lik AMCL titremesi bile %54'e dusurup yalanci alarm veriyordu.
+UYUM_ESIK_M = 0.15
 GOVDE_ICI_M = 0.35          # robotun kendi govdesi/kablosu: bu yaricapin icindeki noktalar atilir
 
 

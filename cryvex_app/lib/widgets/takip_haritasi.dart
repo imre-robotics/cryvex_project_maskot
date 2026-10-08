@@ -139,7 +139,7 @@ class _TakipHaritasiState extends State<TakipHaritasi> with WidgetsBindingObserv
 
   /// Robotun tarama-harita uyumu (0..1); robot_pose 'uyum'. Haritalamada yok.
   double? get _uyum => (_poz?['uyum'] as num?)?.toDouble();
-  bool get _kayip => _uyum != null && _uyum! < 0.55;
+  bool get _kayip => _uyum != null && _uyum! < 0.60;
 
   Future<void> _konumBul() async {
     final api = widget.api;

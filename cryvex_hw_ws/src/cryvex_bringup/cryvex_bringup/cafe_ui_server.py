@@ -770,8 +770,8 @@ class CafeUiServerNode(Node):
             return 0.0
 
     # ---- konum kalitesi ve "Konumumu Bul" ----
-    KONUM_KAYIP_UYUM = 0.55      # bunun altinda robot yerini kaybetmis sayilir
-    KONUM_BUL_KABUL = 0.70       # bulunan konum en az bu uyumda olmali
+    KONUM_KAYIP_UYUM = 0.60      # bunun altinda robot yerini kaybetmis sayilir (~25 cm / 8 derece)
+    KONUM_BUL_KABUL = 0.80       # bulunan konum en az bu uyumda olmali
     KONUM_BUL_FARK = 0.10        # ve ikinci en iyi adaydan bu kadar iyi (karisiklik yok)
 
     def _konum_bulucu(self):

@@ -538,11 +538,11 @@ class _KurulumScreenState extends State<KurulumScreen> {
                     child: Text(
                       _poz == null
                           ? '⚠ Robotun konumu bilinmiyor - "Konumumu Bul" ya da "Robot Burada"'
-                          : _uyum != null && _uyum! < 0.55
+                          : _uyum != null && _uyum! < 0.60
                               ? '⚠ Konum şüpheli (uyum %${(_uyum! * 100).round()}) - "Konumumu Bul"'
                               : 'Konum güveni ${_uyum == null ? '-' : '%${(_uyum! * 100).round()}'}',
                       style: TextStyle(
-                          color: _poz == null || (_uyum ?? 1) < 0.55 ? CryvexColors.amber : CryvexColors.textMuted,
+                          color: _poz == null || (_uyum ?? 1) < 0.60 ? CryvexColors.amber : CryvexColors.textMuted,
                           fontSize: 12),
                     ),
                   ),
