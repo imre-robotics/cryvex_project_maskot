@@ -162,6 +162,10 @@ cryvex_ws/
 ├── cryvex_hw_ws/                 # Gerçek robot
 │   ├── src/cryvex_bringup/       #   Donanım başlatma, stm32_bridge, patrol, UI sunucusu
 │   ├── src/ydlidar_ros2_driver/  #   YDLIDAR T-mini Plus sürücüsü
+│   ├── src/rf2o_laser_odometry/  #   LiDAR odometrisi (EKF dönüşü buradan)
+│   ├── src/frontier_exploration_ros2/ # Otonom keşif paketi
+│   ├── cryvex_araclar/           #   Robot üstü sürüş, güvenlik kapısı, YOLO algılama, görevler (Pi'de ~/cryvex_araclar)
+│   ├── cryvex_veri/              #   HOME/masa noktaları ve referans pozlar (Pi'de ~/cryvex_veri)
 │   ├── stm32_firmware/           #   STM32CubeIDE projesi (HAL, C)
 │   ├── docs/                     #   Gerçek robot rehberi, kurulum playbook'u, seri protokol, CubeMX pinleri
 │   ├── system/                   #   systemd servisi, kiosk oturumu
@@ -210,6 +214,9 @@ kuralları, systemd servisi, kiosk ekranı):
 
 Kablolama, DIP ayarları, kalibrasyon, SLAM ayarları ve sahada çözülen sorunlar:
 **[`cryvex_hw_ws/docs/gercek_robot.md`](cryvex_hw_ws/docs/gercek_robot.md)**
+
+Kamera + YOLO algılama, güvenlik kapısı ve HOME → Masa → HOME görevi:
+**[`cryvex_hw_ws/cryvex_araclar/README.md`](cryvex_hw_ws/cryvex_araclar/README.md)** · çalışma günlüğü: [`GUNLUK.md`](cryvex_hw_ws/docs/GUNLUK.md)
 
 ```bash
 ros2 launch cryvex_bringup hardware_bringup.launch.py   # sensörler + STM32 + EKF + UI
@@ -315,7 +322,9 @@ bağımsız olarak robotu durdurabilir:
 | Bilgisayarsız açılış (güç verince ~40 sn'de hazır) | ✅ Çalışıyor |
 | Isaac Sim 6.1 + Foxglove | 🟡 ROS tarafı uçtan uca test edildi, GPU'da ilk çalıştırma bekliyor |
 | Operatör uygulaması (Flutter, canlı harita) | 🟡 Geliştiriliyor |
-| Gerçek robotta haritalama + otonom devriye | 🟡 EKF ve SLAM düzeltildi, sahada yeniden haritalama |
+| Gerçek robotta HOME → Masa → HOME görevi | ✅ İlk başarı (8 Ekim) |
+| Kamera + YOLO11n algılama | ✅ Çalışıyor |
+| Birden fazla masa, enkoder + IMU | 🔜 Sıradaki |
 | Batarya + JK BMS pil göstergesi | 🔜 Planlandı |
 
 ---

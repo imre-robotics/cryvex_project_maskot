@@ -86,16 +86,16 @@ def generate_launch_description():
             # 16 derece ziplıyordu, teker + LiDAR ICP ise %3 icinde uyumluydu).
             # Odometri artik iyi oldugu icin eslestirici ona yakin kalsin:
             'distance_variance_penalty': 0.1,
-            'angle_variance_penalty': 0.15,
+            'angle_variance_penalty': 0.5,   # 2026-10-05: takilmada odometri yonu kayiyor, lidar daha cok soz sahibi
             'minimum_distance_penalty': 0.4,
             'minimum_angle_penalty': 0.6,
-            'correlation_search_space_dimension': 0.3,   # +-15 cm
-            'coarse_search_angle_offset': 0.175,         # +-10 derece
+            'correlation_search_space_dimension': 0.5,   # +-25 cm (2026-10-05)
+            'coarse_search_angle_offset': 0.35,          # +-20 derece (2026-10-05: takilmalarda harita donuyordu)
             # Yanlis dongu kapatma tum grafi bukup haritayi katlar - daha secici ol.
             'loop_match_minimum_response_coarse': 0.45,
             'loop_match_minimum_response_fine': 0.55,
             # 12 m'ye kadar seyrek uzak isinlar kafe icinde gurultu; 8 m yeter.
-            'max_laser_range': 8.0,
+            'max_laser_range': 12.0,  # 2026-10-03: A yonundeki duvar 11 m - 8 m'de o yondeki bos zemin haritaya islenmiyordu
         }],
     )
 
@@ -122,7 +122,19 @@ def generate_launch_description():
             lifecycle_node_matcher=matches_action(slam_toolbox_node),
             transition_id=Transition.TRANSITION_ACTIVATE))]))
 
+    # 2026-10-05: OTONOM - haritalama acikken Nav2 (MPPI + Collision Monitor) da acilir
+    # (bkz. otonom.launch.py). SLAM ayaga kalksin diye 8 sn sonra. Kapatmak: otonom:=false
+    from launch.actions import IncludeLaunchDescription, TimerAction
+    from launch.launch_description_sources import PythonLaunchDescriptionSource
+    declare_otonom = DeclareLaunchArgument('otonom', default_value='true')
+    otonom_nav = TimerAction(period=8.0, actions=[IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('cryvex_bringup'), 'launch', 'otonom.launch.py')),
+        condition=IfCondition(LaunchConfiguration('otonom')))])
+
     return LaunchDescription([
+        declare_otonom,
+        otonom_nav,
         declare_use_sim_time,
         declare_slam_params,
         declare_fake_odom,

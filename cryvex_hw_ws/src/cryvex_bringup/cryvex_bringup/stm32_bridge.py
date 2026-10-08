@@ -66,6 +66,13 @@ CMD_RESEND_PERIOD_S = 0.10   # STM32'nin 200ms watchdog'unu rahat besler
 CMD_TIMEOUT_S = 0.5
 
 WHEEL_BASE_M = 0.540   # app_config.h WHEEL_BASE_MM ile AYNI TUTULMALI (2026-10-02 olculdu: 54 cm)
+# DONUS_KALIBRASYON 2026-10-03: lidar-ICP olcumu (4 yerinde donus, 0.4 ve 0.8 rad/s):
+# robot komut edilen/odometrinin hesapladigi donusun ~%80'ini yapiyor (teker
+# kaymasi, sarhos tekerler). Etkin iz genisligi 0.54/0.80 = 0.675 m. Odometri
+# bunu kullanir; donus komutlari ANGULAR_CMD_GAIN ile buyutulur ki Nav2 ne
+# istiyorsa robot gercekten o kadar donsun. Duz gidis olcumu: odometri = gercek.
+ODOM_WHEEL_BASE_M = 0.549   # 2026-10-05 sol teker kamalandiktan sonra lidar ICP ile yeniden olculdu (eski 0.675, %23 az donus gosteriyordu)
+ANGULAR_CMD_GAIN = 1.02    # 2026-10-05 yeniden olculdu (eski 1.25)
 BATT_LOW_MV = 23500    # app_config.h BATT_LOW_MV ile AYNI TUTULMALI - 2026-10-02: 22000'den yukseltildi - DM860H en az 24 V ister; LiFePO4'te 23.5 V ~%5-8 kalan sarj
 # Bunun altindaki okuma = batarya TAKILI DEGIL (tezgah testi: Pi/STM32 adaptorden
 # besleniyor, bolucu girisi bos -> ADC 1-3 V arasi gurultu okur). 24 V LiFePO4
@@ -188,7 +195,10 @@ class Stm32Bridge(Node):
     def _send_velocity(self):
         if self._ser is None:
             return
-        line = f'V {self._lx_mm_s} {self._az_mrad_s}\n'
+        # YON_DUZELTME 2026-10-03: kart robotun on/arkasini ters taniyor (ileri
+        # komutu robotu lidarin tersine suruyordu, donus dogruydu) -> sadece
+        # ileri hizin isareti cevrilir.
+        line = f'V {-self._lx_mm_s} {int(self._az_mrad_s * ANGULAR_CMD_GAIN)}\n'   # DONUS_KALIBRASYON
         try:
             self._ser.write(line.encode('ascii'))
         except Exception as exc:  # noqa: BLE001
@@ -258,6 +268,11 @@ class Stm32Bridge(Node):
         except ValueError:
             return
 
+        # YON_DUZELTME: kartin sol/sag sayaclari robot 180 derece ters tanindigi
+        # icin gercek tekerin tersi -> yer degistir + isaret cevir (yaw ayni kalir,
+        # ileri/geri duzelir).
+        left_mm, right_mm = -right_mm, -left_mm
+
         now = self.get_clock().now().to_msg()
         for key, mm in zip(SONAR_ORDER, (fl, fr, rl, rr)):
             self._publish_range(key, mm, now)
@@ -323,10 +338,29 @@ class Stm32Bridge(Node):
              (self._last_odom_stamp.sec + self._last_odom_stamp.nanosec * 1e-9)
         d_left = (left_mm - self._last_left_mm) / 1000.0   # mm -> m
         d_right = (right_mm - self._last_right_mm) / 1000.0
+        # 2026-10-03: hareket halinde tek bir S satiri bozuk gelebiliyor (sayac
+        # ~0.8 m sicrayip sonraki satirda geri donuyor) -> EKF/costmap sicriyor,
+        # DWB "Trajectory Goes Off Grid" verip robot yerinde donuyordu. Fiziksel
+        # olarak imkansiz adimi (0.6 m/s ustu) yok say; taban degismez, sonraki
+        # saglam satir dogru farki verir. Ust uste 5 bozuk = sayac gercekten
+        # degismis (kart reset) -> yeni taban al.
+        max_step = 0.6 * max(dt, 0.05) + 0.05
+        if abs(d_left) > max_step or abs(d_right) > max_step:
+            self._odom_bad = getattr(self, '_odom_bad', 0) + 1
+            self._odom_bad_total = getattr(self, '_odom_bad_total', 0) + 1
+            if self._odom_bad_total <= 5 or self._odom_bad_total % 50 == 0:
+                self.get_logger().warn(
+                    f'Teker odometrisinde imkansiz sicrama yok sayildi (sol {d_left:+.3f} m, '
+                    f'sag {d_right:+.3f} m, dt {dt:.2f} s) - toplam {self._odom_bad_total}')
+            if self._odom_bad >= 5:
+                self._last_left_mm, self._last_right_mm, self._last_odom_stamp = left_mm, right_mm, stamp
+                self._odom_bad = 0
+            return
+        self._odom_bad = 0
         self._last_left_mm, self._last_right_mm, self._last_odom_stamp = left_mm, right_mm, stamp
 
         d_center = (d_left + d_right) / 2.0
-        d_yaw = (d_right - d_left) / WHEEL_BASE_M
+        d_yaw = (d_right - d_left) / ODOM_WHEEL_BASE_M   # DONUS_KALIBRASYON (eskiden WHEEL_BASE_M)
         # Orta-nokta entegrasyonu: donus/ilerleme ayni anda oluyormus gibi
         # kabul edip aci degisiminin YARISINDAKI yonu kullanmak, tek adimda
         # once-don-sonra-ilerle varsayimindan daha az sapma biriktirir.
@@ -335,8 +369,30 @@ class Stm32Bridge(Node):
         self._odom_y += d_center * math.sin(mid_yaw)
         self._odom_yaw = math.atan2(math.sin(self._odom_yaw + d_yaw), math.cos(self._odom_yaw + d_yaw))
 
-        vx = d_center / dt if dt > 1e-6 else 0.0
-        vyaw = d_yaw / dt if dt > 1e-6 else 0.0
+        # YON_DUZELTME: S satirlari Pi yogunken toplu gelir, dt ~0 olur ve hiz
+        # sahte olarak dev cikar (EKF robotu metrelerce isinliyordu). Kart 20 Hz
+        # yollar -> dt'yi en az 45 ms say.
+        # HIZ_PENCERE 2026-10-03: tek aralikla hesaplanan hiz, satirlarin duzensiz
+        # gelmesi yuzunden her 4-5 olcumde bir sahte olarak ~0'a dusuyordu
+        # (0.27 -> 0.05 m/s). Hiz son ~0.15 sn'deki toplam yoldan hesaplanir.
+        tnow = stamp.sec + stamp.nanosec * 1e-9
+        hist = getattr(self, '_vel_hist', None)
+        if hist is None:
+            hist = self._vel_hist = []
+        self._cum_c = getattr(self, '_cum_c', 0.0) + d_center
+        self._cum_y = getattr(self, '_cum_y', 0.0) + d_yaw
+        hist.append((tnow, self._cum_c, self._cum_y))
+        while len(hist) > 2 and tnow - hist[1][0] >= 0.15:
+            hist.pop(0)
+        t_old, c_old, y_old = hist[0]
+        span = tnow - t_old
+        if span >= 0.04:
+            vx = (self._cum_c - c_old) / span
+            vyaw = (self._cum_y - y_old) / span
+        else:
+            dt_v = max(dt, 0.045)
+            vx = d_center / dt_v
+            vyaw = d_yaw / dt_v
         self._emit_odom(stamp, vx, vyaw)
         self._last_real_odom_t = time.monotonic()
 

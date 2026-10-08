@@ -9,7 +9,17 @@ Bu belge, Cryvex'in **fiziksel robot** tarafını uçtan uca anlatır:
 Simülasyon için ana [README](../../README.md) dosyasına, sıfırdan Pi kurulumu için
 [`kurulum_playbook.md`](kurulum_playbook.md) dosyasına bakın.
 
-> Son güncelleme: **2026-10-03** · STM32 yazılımı **1.3.4** · ROS 2 **Jazzy** · Nav2 **1.3**
+> Son güncelleme: **2026-10-08** · STM32 yazılımı **1.3.4** · ROS 2 **Jazzy** · Nav2 **1.3**
+
+> 🔀 **8 Ekim birleştirmesi:** 5–8 Ekim arasında robot üzerinde yapılan çalışma
+> (LiDAR yeniden takıldı, kamera + YOLO algılama, LiDAR odometrisi, kendi sürüş
+> ve güvenlik kapısı, HOME → Masa → HOME görevi) bu depoya birleştirildi.
+> Ayrıntılar: [`../cryvex_araclar/README.md`](../cryvex_araclar/README.md) ve
+> [`GUNLUK.md`](GUNLUK.md). Bu belgede değeri değişen yerler **(8 Ekim)** ile işaretlidir.
+
+> ⚠️ **Güvenlik (8 Ekim):** Acil stop (A1) ve tampon (A0) girişleri geçici
+> olarak GND'ye köprülü, yani **donanımsal güvenlik devre dışı**. Robot
+> insanların arasına çıkmadan önce gerçek NC düğmeler bağlanmalı.
 
 ---
 
@@ -37,15 +47,18 @@ Simülasyon için ana [README](../../README.md) dosyasına, sıfırdan Pi kurulu
 |---|---|---|
 | STM32 ↔ Pi haberleşmesi | ✅ Çalışıyor | Doğrudan UART (USART3 ↔ `ttyAMA0`), 115200 baud |
 | Motorlar (2× DM860H + 2× NEMA 34 step) | ✅ Çalışıyor | Telefon joystick'i ve Nav2 ile sürüldü |
-| Teker odometrisi | ✅ Kalibre | LiDAR'a göre dönüşte ve ileride ~%97 uyum |
-| LiDAR konumu (dış kalibrasyon) | ✅ Ölçüldü | Tarama eşleştirme (ICP) ile, ±1,5 cm / ~1° |
-| EKF (odom → base_footprint) | ✅ Düzeltildi | Yön, tekerin mutlak yön değerinden alınıyor |
-| SLAM (slam_toolbox) | 🟡 Yeni ayar yüklendi | Sahada yeniden haritalama bekleniyor |
+| Teker odometrisi | 🟡 Sınırlı | Step motor adım kaçırınca odometri bunu bilmiyor (enkoder yok) **(8 Ekim)** |
+| LiDAR konumu (dış kalibrasyon) | 🟡 Yeniden takıldı | 36 cm yükseklik, x 0,125 · y −0,045 · −90°; ICP ile yeniden doğrulanmalı **(8 Ekim)** |
+| EKF (odom → base_footprint) | ✅ | İleri hız tekerden, dönüş LiDAR odometrisinden (rf2o) **(8 Ekim)** |
+| SLAM (slam_toolbox) | 🟡 | Takılma/teker kayması olunca harita hâlâ dönebiliyor; çözüm enkoder + IMU |
+| Kamera + YOLO algılama | ✅ | Brio 100 + ±180° taret, YOLO11n ~6 kare/sn, canlı yayın `:8081` **(8 Ekim)** |
+| HOME → Masa → HOME görevi | ✅ İlk başarı | 8 Ekim, masaya 35 cm, HOME'a dönüş < 1 cm **(8 Ekim)** |
+| Acil stop / tampon | ❌ Köprülü | Geçici olarak GND'ye bağlı **(8 Ekim)** |
 | Bilgisayarsız açılış | ✅ Çalışıyor | Güç verildikten ~40 sn sonra hazır |
 | Telefon uygulaması: canlı harita | ✅ Hazır | APK robottan indirilir: `http://<robot>:8080/cryvex.apk` |
 | Otonom devriye (gerçek kafede) | 🔜 Sahada test | Yeni haritadan sonra masalar işaretlenecek |
 | Batarya + JK BMS | 🔜 Bekliyor | Şimdilik 24 V güç kaynağıyla tezgâhta çalışıyor |
-| Ultrasonik sensör konumları | 🔜 Ölçülecek | URDF'te yer tutucu değerler |
+| Ultrasonik sensörler | ⏸️ Takılı değil | URDF'te yer tutucu çerçeveler var; yerine VL53L1X ToF planlı |
 | IMU (MPU6050) | ⏸️ Takılı değil | Yazılım IMU olmadan çalışacak şekilde ayarlı |
 
 ---
@@ -58,12 +71,13 @@ Simülasyon için ana [README](../../README.md) dosyasına, sıfırdan Pi kurulu
 | Alt seviye denetleyici | STM32 Nucleo-F446RE | Motor darbeleri, watchdog, sonar, acil stop |
 | Motor sürücü | 2× **DM860H** | STEP/DIR girişli, optokuplörlü, 24–80 V |
 | Motor | 2× **86HS156-5608A14-B35** (NEMA 34) | 8 kablo, fabrikada 4 uca birleştirilmiş |
-| Teker | 2× Ø150 mm | Teker ortaları arası **540 mm** |
-| Gövde | Ø520 mm daire | Tekerler gövdeden taşar; en dış nokta ~300 mm |
-| LiDAR | YDLIDAR **T-mini Plus** | 360°, 12 m, 7 Hz, 614 ışın; doğrudan Pi'nin USB'sine |
+| Teker | 2× Ø150 mm | Teker ortaları arası **540 mm**; sol teker 5 Ekim'de mile kamalandı |
+| Gövde | Ø520 mm daire | Tekerden tekere **590 mm** (Nav2 yarıçapı 0,30 m) |
+| LiDAR | YDLIDAR **T-mini Plus** | 360°, 12 m, 7 Hz, 614 ışın; doğrudan Pi'nin USB'sine; yerden **36 cm** |
+| Kamera **(8 Ekim)** | Logitech **Brio 100** | NEMA 23 taret üstünde, Leadshine **DMA860H** sürücü (6400 adım), Pi GPIO pin 11/13/9; **±180°, asla tam tur** (kablo) |
 | Motor güç kaynağı (tezgâh) | Omron **S8VK-C24024** | 24 V 10 A |
 | Batarya (planlı) | 24 V 24 Ah LiFePO4 + **JK BMS** (Bluetooth) | BMS'ten pil göstergesi yapılacak |
-| Yakın mesafe | 4× HC-SR04 | Konumlar henüz ölçülmedi |
+| Yakın mesafe | 4× HC-SR04 | **Fiziksel olarak takılı değil**; alışveriş listesinde VL53L1X ToF, AS5600 enkoder, ICM-20948 IMU ([liste](robot_alisveris_listesi.md)) |
 | Ekran | HDMI dokunmatik (kiosk) + tablet (geliştirici ekranı) | 17" dokunmatik ekran planlı |
 
 ---
@@ -304,9 +318,10 @@ değişse de bağlantı kurulur.
 | Teker ortaları arası | 540 mm | `app_config.h`, `stm32_bridge.py` (`WHEEL_BASE_M`) |
 | Robot yarıçapı (Nav2) | 0,30 m | `nav2_params.yaml` (yerel + genel), URDF `footprint_radius` |
 | Şişirme yarıçapı | 0,50 m | `nav2_params.yaml` |
-| LiDAR konumu (`base_link`'e göre) | x = 0,103 m · y = −0,131 m · z = 0,22 m | URDF |
-| LiDAR açısı | **−123°** | URDF `lidar_yaw` |
-| "Ön" yön | Robotun +x yönü | Gövdede belirgin bir ön yok; tekerlerin "ileri" gittiği taraf ön kabul edildi |
+| LiDAR konumu (`base_link`'e göre) **(8 Ekim)** | x = 0,125 m · y = −0,045 m · z = 0,36 m | URDF |
+| LiDAR açısı **(8 Ekim)** | **−90°** | URDF `lidar_yaw` |
+| "Ön" yön **(8 Ekim)** | Kameranın baktığı taraf | 3 Ekim'de ters çevrildi: `stm32_bridge.py` ileri komutunun işaretini çevirir ve sol/sağ teker sayaçlarını yer değiştirir (`YON_DUZELTME`). STM32 yazılımı değişmedi. |
+| Dönüş için etkin iz genişliği **(8 Ekim)** | 0,549 m | `stm32_bridge.py` `ODOM_WHEEL_BASE_M`; dönüş komutu kazancı `ANGULAR_CMD_GAIN` 1,02 |
 
 ### 7.2 Yöntem: LiDAR'ı cetvel olarak kullanmak
 
@@ -325,7 +340,10 @@ bilgisayarda 2B **ICP** (tarama eşleştirme) ile analiz edilir:
    - Duvarlar örtüşüyorsa kalibrasyon doğrudur.
    - Robotla birlikte hareket eden noktalar (zemin ya da gövde yansıması) olmamalıdır.
 
-### 7.3 Sonuçlar (2026-10-02)
+### 7.3 Sonuçlar (2026-10-02, eski LiDAR montajı)
+
+> Bu ölçümler LiDAR yeniden takılmadan **önceki** montaja aittir. Yöntem
+> aynen geçerli; yeni montaj için tekrarlanması önerilir.
 
 | Test | Teker odometrisi | LiDAR (ICP) | Uyum |
 |---|---|---|---|
@@ -345,46 +363,49 @@ Kalan ~%3'lük fark küçüktür; SLAM ve AMCL bunu tarama eşleştirmeyle kapat
 
 ## 8) Konumlama ve haritalama ayarları
 
-### 8.1 EKF ([`ekf.yaml`](../src/cryvex_bringup/config/ekf.yaml))
+### 8.1 EKF ([`ekf.yaml`](../src/cryvex_bringup/config/ekf.yaml)) **(8 Ekim)**
 
 ```yaml
-odom0: /wheel/odom
-odom0_config: [true,  true,  false,    # x, y
-               false, false, true,     # yaw (MUTLAK)
-               true,  false, false,    # vx
-               false, false, false,    # vyaw KULLANILMIYOR
-               false, false, false]
+odom0: /wheel/odom          # teker: SADECE ileri hız (vx)
+odom0_config: [false, false, false,  false, false, false,  true, false, false,  false, false, false,  false, false, false]
+odom1: /odom_rf2o           # LiDAR odometrisi (rf2o_laser_odometry): SADECE dönüş hızı (vyaw)
+odom1_config: [false, false, false,  false, false, false,  false, false, false,  false, false, true,   false, false, false]
 ```
 
-Teker hızları, seri hattan gelen satırların varış zamanlarından hesaplanır.
-Pi meşgulken bu zamanlar titrer ve **açısal hız (vyaw) gürültülü** çıkar. EKF
-yönü bu hızdan entegre ettiğinde, tek bir dönüşte teker odometrisinden
-**79° sapmıştı**. Yön artık tekerin mutlak (adım sayısından hesaplanan) yön
-değerinden alınıyor. Tam turdan sonraki fark **0,7°**.
+Tarihçe:
+1. **2 Ekim:** Yön, titrek açısal hızdan entegre ediliyordu; tek dönüşte **79°** sapma. Çözüm: tekerin mutlak yönü (sapma 0,7°).
+2. **5 Ekim:** Robot takılınca ya da teker boşa dönünce teker yönü de bozuluyordu, çünkü step motor adım kaçırınca odometri bunu görmez. Çözüm: dönüş artık LiDAR odometrisinden (rf2o). Ölçülen sapma 1–2°.
+3. **Kalıcı çözüm (planlı):** AS5600 teker enkoderi + ICM-20948 IMU → EKF.
 
-### 8.2 slam_toolbox ([`mapping.launch.py`](../src/cryvex_bringup/launch/mapping.launch.py))
+> ⚠️ rf2o yavaş hızda hareketi iyi ölçemiyor; "takılma" tespitinde yanlış alarm verebiliyor (bkz. [`GUNLUK.md`](GUNLUK.md) 7 Ekim).
 
-slam_toolbox'un varsayılan ayarlarında tarama eşleştirici teker odometrisini
-neredeyse hiç cezalandırmaz:
-- ±25 cm ve ±20° içinde tarama en çok nereye benziyorsa oraya atlar.
-- Sandalye ve masa ayağı dolu bir kafede bu yanlış eşleşme demektir.
-- Ölçümde robot dümdüz giderken SLAM konumu 0,05 m ile 0,87 m arasında gidip geldi ve 16° döndü.
-- Aynı anda teker ve LiDAR %3 içinde uyumluydu.
+`stm32_bridge.py`'de ayrıca şunlar yapıldı (3 Ekim):
+- Bozuk seri satırlardan gelen imkânsız teker sıçramaları atılıyor.
+- Hız, son 0,15 sn'deki toplam yoldan hesaplanıyor; satırlar düzensiz gelince sahte sıfır hız çıkmıyor.
 
-Odometri artık güvenilir olduğu için eşleştirici ona yakın tutulur:
+### 8.2 slam_toolbox ([`mapping.launch.py`](../src/cryvex_bringup/launch/mapping.launch.py)) **(8 Ekim)**
 
-| Parametre | Varsayılan | Cryvex | Etkisi |
-|---|---|---|---|
-| `minimum_travel_distance` / `_heading` | 0,5 m / 0,5 rad | 0,2 m / 0,2 rad | Kafe ölçeğinde daha sık tarama |
-| `distance_variance_penalty` | 0,5 | **0,1** | Odometriden konum sapmasına ceza |
-| `angle_variance_penalty` | 1,0 | **0,15** | Odometriden açı sapmasına ceza |
-| `minimum_distance_penalty` | 0,5 | 0,4 | |
-| `minimum_angle_penalty` | 0,9 | **0,6** | Açı cezası %10 ile sınırlı kalmasın |
-| `correlation_search_space_dimension` | 0,5 | **0,3** | Arama penceresi ±15 cm |
-| `coarse_search_angle_offset` | 0,349 | **0,175** | Arama penceresi ±10° |
-| `loop_match_minimum_response_coarse` / `_fine` | 0,35 / 0,45 | **0,45 / 0,55** | Yanlış döngü kapatmaya karşı daha seçici |
-| `max_laser_range` | 20 m | **8 m** | Uzak, seyrek ışınlar gürültü |
-| `map_update_interval` | 5 s | 1 s | Canlı harita saniyede bir güncellenir |
+| Parametre | Varsayılan | 2 Ekim | **Şimdi** | Neden |
+|---|---|---|---|---|
+| `minimum_travel_distance` / `_heading` | 0,5 / 0,5 | 0,2 / 0,2 | 0,2 / 0,2 | Kafe ölçeğinde daha sık tarama |
+| `distance_variance_penalty` | 0,5 | 0,1 | 0,1 | Odometriden konum sapmasına ceza |
+| `angle_variance_penalty` | 1,0 | 0,15 | **0,5** | Takılmada odometri yönü kayıyor, LiDAR daha çok söz sahibi |
+| `minimum_angle_penalty` | 0,9 | 0,6 | 0,6 | |
+| `correlation_search_space_dimension` | 0,5 | 0,3 | **0,5** | ±25 cm |
+| `coarse_search_angle_offset` | 0,349 | 0,175 | **0,35** | ±20°; takılmalarda harita dönüyordu |
+| `loop_match_minimum_response_coarse` / `_fine` | 0,35 / 0,45 | 0,45 / 0,55 | 0,45 / 0,55 | Yanlış döngü kapatmaya karşı seçici |
+| `max_laser_range` | 20 m | 8 m | **12 m** | Bir yöndeki duvar 11 m uzakta |
+| `map_update_interval` | 5 s | 1 s | 1 s | Canlı harita saniyede bir |
+
+2 Ekim'deki daraltma, odometrinin güvenilir olduğu varsayımına dayanıyordu.
+Adım kaçırma ortaya çıkınca pencere tekrar genişletildi. Enkoder ve IMU
+gelince yeniden daraltmak düşünülebilir.
+
+**Haritalama + otonom Nav2:**
+- Haritalama açılınca 8 sn sonra **`otonom.launch.py`** de açılır: sade Nav2 (planlayıcı, Rotation Shim + Regulated Pure Pursuit denetleyici, collision_monitor, velocity_smoother) ve [`nav2_otonom.yaml`](../src/cryvex_bringup/config/nav2_otonom.yaml).
+- Kapatmak için: `otonom:=false`.
+- Nav2 bu modda yerinde dönmez (kablo kuralı).
+- Global costmap 12×12 m kayan pencere; 6 m'den uzak hedefler ara noktalarla verilir.
 
 **İyi bir harita için sürüş önerileri:**
 - Yavaş gidin, yerinde dönüşleri de yavaş yapın.
@@ -456,6 +477,12 @@ görürseniz önce buraya bakın.
 | 10 | Harita hâlâ katlanıyor, kırmızı tarama duvarlarla örtüşmüyor | slam_toolbox eşleştiricisi odometriyi yok sayıp yanlış eşleşmelere atlıyor. LiDAR açısında 5° hata | Eşleştirme penceresi daraltıldı, sapma cezaları artırıldı. LiDAR açısı −128° → −123° | `80c9808` |
 | 11 | LiDAR sürekli zaman aşımına düşüyor | Beslemesiz USB çoklayıcı yetersiz akım veriyor | LiDAR doğrudan Pi'ye takıldı; gerekirse beslemeli çoklayıcı | — |
 | 12 | Nav2 her 2,5 sn'de "frame does not exist" diyor, sonarlar kullanılmıyor | URDF'te sonar çerçeveleri yoktu | `sonar_{fl,fr,rl,rr}_link` eklendi (konumlar yer tutucu) | — |
+| 13 | "İleri" komutu robotu LiDAR'ın tersine sürüyor | Robotun önü kamera tarafı seçildi | Pi tarafında ileri işareti ve sol/sağ sayaçlar çevrildi (`YON_DUZELTME`, 3 Ekim) | 8 Ekim birleştirmesi |
+| 14 | Hareket halinde EKF/costmap sıçrıyor, DWB "Trajectory Goes Off Grid" | Tek bozuk seri satırda teker sayacı ~0,8 m sıçrıyor | İmkânsız adımlar (> 0,6 m/s) atılıyor | 8 Ekim birleştirmesi |
+| 15 | Canlı harita sunucuyu boğuyor, joystick gecikiyor | Her istekte ~330 ms yeniden çizim | 1 sn önbellek + hızlı sıkıştırma | 8 Ekim birleştirmesi |
+| 16 | "Zayıf sol teker", dönüşler %20 eksik | Sol teker göbeği mile sabit değildi | Kama takıldı; iz genişliği 0,549 m ile yeniden ölçüldü | 8 Ekim birleştirmesi |
+| 17 | Robot takılınca harita ~60° dönmüş ikinci kopya çıkarıyor | Step motor adım kaçırıyor, teker odometrisi bunu bilmiyor | Dönüş rf2o'dan; SLAM penceresi genişletildi. **Kalıcı çözüm açık:** enkoder + IMU | 8 Ekim birleştirmesi |
+| 18 | Gri duvar / siyah tahta LiDAR'da neredeyse görünmüyor | Mat koyu yüzeyden zayıf yansıma | Gelinen izi takip ederek geri çıkış + engel hafızası | 8 Ekim birleştirmesi |
 
 **Hata ayıklama ipuçları:**
 - `pkill -f <ad>` ve `pgrep -f <ad>` ssh komut satırının kendisini de yakalayabilir. `pgrep -x`, `killall` ya da `fuser -k <port>/tcp` tercih edin.
@@ -490,11 +517,16 @@ ros2 run tf2_ros tf2_echo base_link lidar_link
 
 ## 13) Açık işler
 
-- [ ] **Yeni ayarlarla yeniden haritalama.** Ardından masaları işaretleyip devriyede Nav2 davranışını analiz etmek.
+- [ ] **Acil stop ve tamponu gerçek NC düğmelere bağlamak** (şu an GND'ye köprülü).
+- [ ] **AS5600 enkoder + ICM-20948 IMU → EKF:** adım kaçırma ve harita dönmesinin kalıcı çözümü.
+- [ ] **VL53L1X ToF:** LiDAR düzleminin (36 cm) altındaki alçak engeller.
+- [ ] **Yeni LiDAR montajını ICP ile doğrulamak** ([§7.2](#72-yöntem-lidarı-cetvel-olarak-kullanmak)).
+- [ ] **Birden fazla masa:** düz çizgide olmayan masalar, masa seçme ve masa sırası ([`mimari_v1.md`](mimari_v1.md) aşama 9–12).
+- [ ] **Nav2 sadece planlasın**, yolu güvenlik kapısından geçen kendi sürücümüz izlesin.
+- [ ] **Operatör PIN'ini** depo dışındaki bir ayar dosyasına taşımak.
 - [ ] **Batarya:** JK BMS'i Bluetooth (BLE) ile okumak, uygulamada pil göstergesi göstermek. Hücreler derin deşarjlı görünüyor; şarj öncesi kontrol gerekiyor.
 - [ ] **Güvenlik:** LiDAR verisi yoksa devriyeyi başlatmamak.
 - [ ] **Donanımsal acil stop:** mantar buton + röle ile motor gücünü kesmek; ENA− ile motorları serbest bırakmak.
-- [ ] **Sonar konumlarını ölçmek** ve URDF'e işlemek.
 - [ ] **17" dokunmatik ekran** ve harici beslemeli USB çoklayıcı.
 - [ ] **İnce ayarlar:**
   - Teker çapını ~146 mm'ye çekip kalan %3'lük ölçek farkını sıfırlamak.

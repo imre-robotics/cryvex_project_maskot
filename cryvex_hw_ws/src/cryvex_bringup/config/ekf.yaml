@@ -9,7 +9,7 @@
 # sapar; bu EKF'nin ve AMCL'in (LiDAR) tam olarak bunun icin var oldugu yer.
 ekf_filter_node:
   ros__parameters:
-    frequency: 30.0
+    frequency: 20.0
     two_d_mode: true            # robot duz zeminde, z/roll/pitch onemsiz
     print_diagnostics: true
     publish_tf: true
@@ -28,15 +28,22 @@ ekf_filter_node:
     # EKF -37.5 derece - 79 derece fark) -> SLAM haritasi capraz cizgilerle
     # bozuluyor, AMCL/Nav2 saciyordu. IMU takilinca: yaw'i kapatip imu0 vyaw
     # ile birlikte odom0 vyaw kullanin (ya da odom0_differential: true).
-    odom0_config: [true,  true,  false,
-                   false, false, true,
+    # 2026-10-05: teker -> sadece ileri hiz (vx). Yon/donus -> LiDAR odometrisi (rf2o).
+    odom0_config: [false, false, false,
+                   false, false, false,
                    true,  false, false,
                    false, false, false,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
-
-    # ---- IMU (stm32_bridge.py zaten yayinliyor - sadece Z ekseni donus hizi) ----
+    odom1: /odom_rf2o
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, true,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
     imu0: /imu/data_raw
     imu0_config: [false, false, false,
                   false, false, false,

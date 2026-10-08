@@ -145,7 +145,7 @@ def _png_bytes(width, height, pixels, channels=1):
     for y in range(height):
         raw.append(0)
         raw.extend(pixels[y * stride:(y + 1) * stride])
-    compressed = zlib.compress(bytes(raw), 6)
+    compressed = zlib.compress(bytes(raw), 1)  # 2026-10-03: 6 -> 1, Pi'de ~3 kat hizli (canli harita sik isteniyor)
 
     def chunk(tag, payload):
         return (struct.pack('>I', len(payload)) + tag + payload +
@@ -218,6 +218,11 @@ def _blend(region, color, alpha, mask=None):
         region[...] = region * (1.0 - alpha) + color * alpha
     else:
         region[mask] = region[mask] * (1.0 - alpha) + color * alpha
+
+
+LIVE_MAP_CACHE_S = 1.0          # canli harita PNG onbellek suresi (bkz. live_map_png_bytes)
+_LIVE_PNG_CACHE = {}
+_LIVE_PNG_LOCK = threading.Lock()
 
 
 def _live_map_png(msg, scan_xy, robot_pose, grid=True, marks=None, plan_xy=None, crop=False):
@@ -709,6 +714,22 @@ class CafeUiServerNode(Node):
         return marks
 
     def live_map_png_bytes(self, grid=True, marks=False, plan=False, crop=False):
+        # 2026-10-03: canli harita her istekte sifirdan ~330 ms cizilip
+        # sikistiriliyordu; robot ekrani (1.2 sn) + telefon birlikte isteyince
+        # sunucu bogulup joystick/durum isteklerini geciktiriyordu (robot
+        # titreyerek gidiyor, harita yanip sonuyordu). Ayni ayarla LIVE_MAP_CACHE_S
+        # icinde gelen istekler hazir resmi alir; ayni anda tek cizim yapilir.
+        key = (bool(grid), bool(marks), bool(plan), bool(crop))
+        with _LIVE_PNG_LOCK:
+            hit = _LIVE_PNG_CACHE.get(key)
+            if hit and time.monotonic() - hit[0] < LIVE_MAP_CACHE_S:
+                return hit[1]
+            png = self._render_live_map_png_bytes(grid, marks, plan, crop)
+            if png is not None:
+                _LIVE_PNG_CACHE[key] = (time.monotonic(), png)
+            return png
+
+    def _render_live_map_png_bytes(self, grid=True, marks=False, plan=False, crop=False):
         with self._lock:
             msg = self._live_map_msg
         if msg is None or msg.info.width == 0:
@@ -1315,6 +1336,45 @@ class CafeUiServerNode(Node):
         self.mode = 'tagging'
         return captured_pose is not None
 
+    # ---- 2026-10-05 OTONOM: ~/cryvex_araclar/otonom_gezgin.py (Nav2 tabanli kesif/devriye) ----
+    OTONOM_LOG = os.path.expanduser('~/cryvex_araclar/otonom.log')
+
+    def otonom_calisiyor(self):
+        p = getattr(self, '_otonom_proc', None)
+        return p is not None and p.poll() is None
+
+    def otonom_baslat(self, mod, yeni=False):
+        self.otonom_durdur()
+        cmd = ['python3', '-u', os.path.expanduser('~/cryvex_araclar/otonom_gezgin.py'), '--mod', mod]
+        if yeni:
+            cmd.append('--yeni')
+        self.mode = 'mapping'
+        self._otonom_proc = subprocess.Popen(cmd, cwd=os.path.expanduser('~/cryvex_araclar'),
+                                             stdout=open(self.OTONOM_LOG, 'w'), stderr=subprocess.STDOUT,
+                                             start_new_session=True)
+        self.get_logger().info(f'OTONOM basladi: {mod} (yeni={yeni})')
+
+    def otonom_durdur(self):
+        p = getattr(self, '_otonom_proc', None)
+        if p is not None and p.poll() is None:
+            try:
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                p.wait(timeout=25)
+            except Exception:  # noqa: BLE001
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except Exception:  # noqa: BLE001
+                    pass
+        self._otonom_proc = None
+        self.publish_cmd(0.0, 0.0)
+
+    def otonom_log(self, n=25):
+        try:
+            with open(self.OTONOM_LOG) as f:
+                return f.read().splitlines()[-n:]
+        except FileNotFoundError:
+            return []
+
     def publish_cmd(self, lx, az):
         lx = max(-JOY_MAX_LIN, min(JOY_MAX_LIN, float(lx)))
         az = max(-JOY_MAX_ANG, min(JOY_MAX_ANG, float(az)))
@@ -1420,6 +1480,10 @@ class CafeUiServerNode(Node):
                     self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
+                elif path in ('/otonom', '/otonom.html'):
+                    self._serve_file('otonom.html', 'text/html; charset=utf-8')
+                elif path == '/api/otonom':
+                    self._send_json({'calisiyor': node_self.otonom_calisiyor(), 'log': node_self.otonom_log()})
                 elif path == '/api/mode':
                     self._send_json({'mode': node_self.mode, 'configured': node_self.is_configured()})
                 elif path == '/api/status':
@@ -1646,6 +1710,20 @@ class CafeUiServerNode(Node):
                         error(str(e))
                         return
                     ok(pose_captured=pose_captured)
+                elif path == '/api/otonom':
+                    if need_password():
+                        error('wrong password')
+                        return
+                    mod = str(d.get('mod', ''))
+                    if mod in ('kesif', 'devriye'):
+                        node_self.otonom_baslat(mod, yeni=bool(d.get('yeni', False)))
+                        ok()
+                    elif mod == 'dur':
+                        node_self.publish_patrol('stop')
+                        threading.Thread(target=node_self.otonom_durdur, daemon=True).start()
+                        ok()
+                    else:
+                        error('mod: kesif | devriye | dur')
                 elif path == '/api/cancel_mapping':
                     if need_password():
                         error('wrong password')

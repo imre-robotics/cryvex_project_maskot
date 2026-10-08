@@ -8,3 +8,16 @@ __pycache__/
 
 # Robotun web sunucusundan dagitilan telefon uygulamasi (derleme ciktisi)
 cryvex_hw_ws/src/cryvex_bringup/web/cryvex.apk
+
+# Robotun calisma sirasinda yazdigi veriler (siparisler, son konum, kayitlar)
+cryvex_hw_ws/src/cryvex_bringup/config/orders.json
+cryvex_hw_ws/src/cryvex_bringup/config/last_pose.json
+cryvex_hw_ws/cryvex_araclar/kayit/
+cryvex_hw_ws/cryvex_araclar/haritalar/
+cryvex_hw_ws/cryvex_araclar/govde/*.jpg
+cryvex_hw_ws/cryvex_veri/haritalar/
+*.log
+*.yedek*
+# Buyuk/yeniden uretilebilir modeller (bkz. cryvex_araclar/README.md)
+cryvex_hw_ws/cryvex_araclar/modeller/*.pt
+cryvex_hw_ws/cryvex_araclar/modeller/MobileNetSSD_*

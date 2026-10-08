@@ -270,6 +270,7 @@ class CommandListener(Node):
                 self.state = STATE_PATROL
                 self.greeting = False
                 self.cute = False
+                self.patrol_restart = True   # TEK_TUR: her 'start' ilk masadan baslar
                 self.get_logger().info('KOMUT: Devriye BASLAT')
 
         elif cmd == 'stop':
@@ -724,6 +725,17 @@ def fast_arrival_seconds():
             return max(0.0, float(json.load(f).get('fast_arrival_seconds', 0) or 0))
     except (OSError, ValueError, TypeError, AttributeError):
         return 0.0
+
+
+def single_pass_enabled():
+    """TEK_TUR - config/robot_settings.json -> "single_pass" (true = devriye
+    masalari BIR KEZ sirayla gezer, sonra barmen/us noktasina donup durur;
+    false/yok = eskisi gibi sonsuz dongu). Her turda okunur, restart gerekmez."""
+    try:
+        with open(os.path.join(_pkg_dir('config'), 'robot_settings.json'), encoding='utf-8') as f:
+            return bool(json.load(f).get('single_pass', False))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def load_waypoints_cfg():
@@ -1262,9 +1274,18 @@ def main():
                 _depart_maneuver(listener, STATE_PATROL)
                 if listener.state != STATE_PATROL:
                     continue
+            if getattr(listener, 'patrol_restart', False):   # TEK_TUR: yeni 'start' -> ilk masa
+                listener.patrol_restart = False
+                wp_index = 0
             if listener.next_wp_index is not None:  # teslimattan sonra sonraki masadan devam
                 wp_index = listener.next_wp_index
                 listener.next_wp_index = None
+            if wp_index >= len(WAYPOINTS) and single_pass_enabled():
+                # TEK_TUR: tum masalar bir kez gezildi -> barmen/us noktasina don ve dur
+                wp_index = 0
+                listener.get_logger().info('[TEK TUR] Masalar bitti -> use donuluyor.')
+                listener.state = STATE_GOING_HOME if HOME_POSITION else STATE_IDLE
+                continue
             wp_index %= len(WAYPOINTS)
             wp = WAYPOINTS[wp_index]
             listener.table_index = wp_index

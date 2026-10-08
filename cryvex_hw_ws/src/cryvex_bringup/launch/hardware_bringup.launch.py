@@ -80,6 +80,35 @@ def generate_launch_description():
         remappings=[('odometry/filtered', '/odom')],
     )
 
+    # 2026-10-05: LiDAR odometrisi (rf2o). Teker takilip/kayinca teker odometrisinin
+    # yonu bozuluyor ve SLAM haritasi donuyordu. EKF donusu buradan, ileri hizi tekerden alir.
+    rf2o_node = Node(
+        package='rf2o_laser_odometry',
+        executable='rf2o_laser_odometry_node',
+        name='rf2o_laser_odometry',
+        output='screen',
+        parameters=[{'laser_scan_topic': '/scan', 'odom_topic': '/odom_rf2o', 'publish_tf': False,
+                     'base_frame_id': 'base_footprint', 'odom_frame_id': 'odom',
+                     'init_pose_from_topic': '', 'freq': 10.0, 'use_sim_time': False}],
+        ros_arguments=['--log-level', 'warn'],   # her taramada INFO basip gunlugu dolduruyordu
+        respawn=True,
+        respawn_delay=3.0,
+    )
+
+    # 2026-10-06: ALGILAMA = YOLO11n yapay zeka (NCNN) + lidar kumeleri -> hitbox'lar (eski: kamera_engel.py). Nesneleri tanir, lidarla uzakligini olcer,
+    # Nav2 engel haritasina yazar (/kamera_engeller, costmap 'kamera_layer'). Canli ekran :8081
+    # Kamera/YOLO ortami (~/cryvex_ai) ya da ~/cryvex_araclar yoksa (yeni kurulum,
+    # kamera takili degil) algilama atlanir; geri kalan sistem normal acilir.
+    from launch.actions import ExecuteProcess, LogInfo
+    algilama_py = os.path.expanduser('~/cryvex_ai/bin/python')
+    algilama_betik = os.path.expanduser('~/cryvex_araclar/algilama.py')
+    if os.path.exists(algilama_py) and os.path.exists(algilama_betik):
+        kamera_engel = ExecuteProcess(
+            cmd=[algilama_py, '-u', algilama_betik, '--fov', '38', '--yuk', '0.32'],
+            cwd=os.path.dirname(algilama_betik), output='screen', respawn=True, respawn_delay=5.0)
+    else:
+        kamera_engel = LogInfo(msg='Algilama atlandi: ~/cryvex_ai veya ~/cryvex_araclar/algilama.py yok.')
+
     cafe_ui_server = Node(
         package='cryvex_bringup',
         executable='cafe_ui_server',
@@ -108,6 +137,8 @@ def generate_launch_description():
         robot_state_publisher,
         stm32_bridge,
         ydlidar_node,
+        rf2o_node,
+        kamera_engel,
         ekf_node,
         cafe_ui_server,
         patrol,
