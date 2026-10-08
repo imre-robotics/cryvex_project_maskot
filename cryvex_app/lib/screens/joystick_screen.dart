@@ -6,6 +6,7 @@ import '../state/robot_state.dart';
 import '../theme.dart';
 import '../tts.dart';
 import '../widgets/joystick.dart';
+import '../widgets/yon_tuslari.dart';
 import '../widgets/password_sheet.dart';
 
 /// index.html'deki #overlay-mapping'in (joyMode: map/rescue/control) Flutter
@@ -24,6 +25,7 @@ class _JoystickScreenState extends State<JoystickScreen> {
   Timer? _sendTimer;
   Timer? _mapTimer;
   double _lx = 0, _az = 0;
+  bool _tuslar = false;   // true: yön tuşları, false: joystick
   bool _busy = false;
   List<dynamic> _tables = [];
   bool _started = false;
@@ -290,7 +292,21 @@ class _JoystickScreenState extends State<JoystickScreen> {
                     ),
                     if (widget.mode == JoyMode.map) _liveMapView(),
                     const SizedBox(height: 12),
-                    Joystick(onMove: _onMove, onRelease: _onRelease),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('🕹️ Joystick')),
+                        ButtonSegment(value: true, label: Text('⬆️ Yön tuşları')),
+                      ],
+                      selected: {_tuslar},
+                      onSelectionChanged: (v) {
+                        _onRelease();   // geçişte robot dursun
+                        setState(() => _tuslar = v.first);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _tuslar
+                        ? YonTuslari(onMove: _onMove, onRelease: _onRelease)
+                        : Joystick(onMove: _onMove, onRelease: _onRelease),
                     if (widget.mode == JoyMode.control) ...[
                       const SizedBox(height: 16),
                       _tablePicker(),
