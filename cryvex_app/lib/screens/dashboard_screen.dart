@@ -9,6 +9,7 @@ import '../widgets/live_map.dart';
 import '../widgets/password_sheet.dart';
 import 'connect_screen.dart';
 import 'joystick_screen.dart';
+import 'otonom_screen.dart';
 import 'panel_screen.dart';
 import 'setup_webview_screen.dart';
 
@@ -175,8 +176,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _actionButton('🕹️ Kontrol Sende', CryvexButtonStyle.cyan,
                     () => _openJoystick(JoyMode.control)),
                 const SizedBox(height: 18),
+                _sectionLabel('Otonom'),
+                _actionButton('🤖 Otonom Sürüş (Keşfet · Devriye · Kamera)', CryvexButtonStyle.green,
+                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OtonomScreen()))),
+                const SizedBox(height: 18),
                 _sectionLabel('Kurulum'),
-                _actionButton('🗺️ Ortamı Haritala', CryvexButtonStyle.cyan,
+                _actionButton('🗺️ Ortamı Haritala (Joystick ile)', CryvexButtonStyle.cyan,
                     () => _openJoystick(JoyMode.map)),
                 _actionButton('📍 Masa/Kapı Noktaları', CryvexButtonStyle.gray,
                     () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SetupWebviewScreen()))),

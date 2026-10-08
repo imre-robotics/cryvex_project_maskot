@@ -85,6 +85,23 @@ class RobotApi {
   Future<Map<String, dynamic>> cancelMapping(String password) =>
       _postJson('/api/cancel_mapping', {'password': password}, _longOp);
 
+  // ---- otonom sürüş (~/cryvex_araclar/otonom_gezgin.py, bkz. cafe_ui_server /api/otonom) ----
+  /// {calisiyor: bool, log: [son satirlar]}
+  Future<Map<String, dynamic>> otonomStatus() => _getJson('/api/otonom');
+
+  /// mod: kesif | devriye | dur. kesif+yeni = bulundugu yerde haritayi sifirdan
+  /// cikarir. Sunucu once eski sureci kapatir (25 sn'ye kadar) -> uzun zaman asimi.
+  Future<Map<String, dynamic>> otonom(String mod, String password, {bool yeni = false}) =>
+      _postJson('/api/otonom', {'password': password, 'mod': mod, 'yeni': yeni}, _longOp);
+
+  /// Kamera + YOLO algilamanin son karesi (algilama.py, ayri sunucu :8081).
+  /// Kamera/algilama calismiyorsa istek basarisiz olur ya da 503 doner.
+  String cameraFrameUrl() {
+    final u = Uri.parse(baseUrl);
+    return u.replace(port: 8081, path: '/kare.jpg',
+        query: '_=${DateTime.now().millisecondsSinceEpoch}').toString();
+  }
+
   /// Haritalama sonrasi manuel "Robot Burada" (2D pose estimate).
   Future<Map<String, dynamic>> setPose(double x, double y, double yaw) =>
       _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': yaw});
