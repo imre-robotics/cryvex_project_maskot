@@ -93,6 +93,7 @@ class _KurulumScreenState extends State<KurulumScreen> {
   bool _mesgul = false;
 
   RobotApi get _api => context.read<RobotState>().api!;
+  double? get _uyum => (_poz?['uyum'] as num?)?.toDouble();
 
   @override
   void initState() {
@@ -221,6 +222,19 @@ class _KurulumScreenState extends State<KurulumScreen> {
   void _boyaDevam(Offset f) {
     if ((_arac != _Arac.beyaz && _arac != _Arac.siyah) || _darbeler.isEmpty) return;
     setState(() => _darbeler.last.pts.add(f));
+  }
+
+  Future<void> _konumBul() async {
+    setState(() => _mesgul = true);
+    final r = await _api.konumBul();
+    if (!mounted) return;
+    setState(() => _mesgul = false);
+    _bildir(r['result'] != 'ok'
+        ? '❌ Bulunamadı: ${r['reason'] ?? ''}'
+        : r['emin'] == true
+            ? '✅ Robot yerini buldu (uyum %${((r['uyum'] as num) * 100).round()})'
+            : '⚠ Emin olamadı (%${((r['uyum'] as num) * 100).round()}). "Robot + Yön" ile elle verin.');
+    _pozAl();
   }
 
   Future<void> _boyayiUygula() async {
@@ -523,10 +537,19 @@ class _KurulumScreenState extends State<KurulumScreen> {
                   Expanded(
                     child: Text(
                       _poz == null
-                          ? '⚠ Robotun konumu bilinmiyor - "Robot Burada" ile verin'
-                          : 'Robot: x ${(_poz!['x'] as num).toStringAsFixed(2)} · y ${(_poz!['y'] as num).toStringAsFixed(2)}',
-                      style: TextStyle(color: _poz == null ? CryvexColors.amber : CryvexColors.textMuted, fontSize: 12),
+                          ? '⚠ Robotun konumu bilinmiyor - "Konumumu Bul" ya da "Robot Burada"'
+                          : _uyum != null && _uyum! < 0.55
+                              ? '⚠ Konum şüpheli (uyum %${(_uyum! * 100).round()}) - "Konumumu Bul"'
+                              : 'Konum güveni ${_uyum == null ? '-' : '%${(_uyum! * 100).round()}'}',
+                      style: TextStyle(
+                          color: _poz == null || (_uyum ?? 1) < 0.55 ? CryvexColors.amber : CryvexColors.textMuted,
+                          fontSize: 12),
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Konumumu Bul (robot haritada kendini arar)',
+                    onPressed: _mesgul ? null : _konumBul,
+                    icon: const Icon(Icons.my_location),
                   ),
                   FilledButton.icon(
                     onPressed: _kaydedilmedi && !_mesgul ? _kaydet : null,

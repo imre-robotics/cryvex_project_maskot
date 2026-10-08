@@ -48,6 +48,7 @@ class _TakipHaritasiState extends State<TakipHaritasi> with WidgetsBindingObserv
   int _tik = 0;
   bool _mesgul = false;
   bool _arkaPlanda = false;
+  bool _araniyor = false;
 
   @override
   void initState() {
@@ -136,6 +137,25 @@ class _TakipHaritasiState extends State<TakipHaritasi> with WidgetsBindingObserv
     return null;
   }
 
+  /// Robotun tarama-harita uyumu (0..1); robot_pose 'uyum'. Haritalamada yok.
+  double? get _uyum => (_poz?['uyum'] as num?)?.toDouble();
+  bool get _kayip => _uyum != null && _uyum! < 0.55;
+
+  Future<void> _konumBul() async {
+    final api = widget.api;
+    if (api == null || _araniyor) return;
+    setState(() => _araniyor = true);
+    final r = await api.konumBul();
+    if (!mounted) return;
+    setState(() => _araniyor = false);
+    final mesaj = r['result'] != 'ok'
+        ? '❌ Bulunamadı: ${r['reason'] ?? ''}'
+        : r['emin'] == true
+            ? '✅ Robot yerini buldu (uyum %${((r['uyum'] as num) * 100).round()})'
+            : '⚠ Emin olamadı (en iyi %${((r['uyum'] as num) * 100).round()}). Harita Kurulumu → Robot + Yön ile elle verin.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mesaj)));
+  }
+
   void _tamEkran() {
     if (_png == null) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => _TamEkran(ust: this)));
@@ -173,13 +193,35 @@ class _TakipHaritasiState extends State<TakipHaritasi> with WidgetsBindingObserv
                 : GestureDetector(onTap: _tamEkran, child: _harita()),
           ),
         ),
+        if (_kayip) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: CryvexColors.amber.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: CryvexColors.amber.withValues(alpha: 0.4)),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text('⚠ Robot yerini kaybetmiş olabilir (uyum %${(_uyum! * 100).round()}). Devriyeden önce düzeltin.',
+                    style: const TextStyle(color: CryvexColors.amber, fontSize: 12.5)),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _araniyor ? null : _konumBul,
+                child: Text(_araniyor ? 'Arıyor…' : '🔍 Konumumu Bul'),
+              ),
+            ]),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
           _hata != null && _png != null
               ? '⚠ $_hata · son konum gösteriliyor'
               : _poz == null
                   ? '⚠ Robotun haritadaki yeri bilinmiyor (Harita Kurulumu → Robot Burada)'
-                  : 'Mavi: robot ve baktığı yön · sarı: gideceği yol · halka: şu anki hedefi',
+                  : 'Mavi: robot · sarı: gideceği yol · halka: hedefi${_uyum != null ? ' · konum güveni %${(_uyum! * 100).round()}' : ''}',
           style: TextStyle(color: _hata != null || _poz == null ? CryvexColors.amber : CryvexColors.textMuted, fontSize: 11.5),
         ),
       ]),

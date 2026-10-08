@@ -115,6 +115,10 @@ class RobotApi {
   /// {ok: bool, x, y, yaw, mode} - ok=false: konum sistemi kapali.
   Future<Map<String, dynamic>> robotPose() => _getJson('/api/robot_pose');
 
+  /// Robot bütün haritada LiDAR taramasıyla kendini arar; emin olursa konumunu
+  /// kendisi düzeltir. {result, emin, uyum, ikinci, x, y, yaw, sure_s}
+  Future<Map<String, dynamic>> konumBul() => _postJson('/api/konum_bul', {}, _longOp);
+
   /// {"barista": {...}|null, "door": {...}|null, "tables": [{isim, x, y, yaw}, ...]}
   Future<Map<String, dynamic>> saveWaypoints(Map<String, dynamic> cfg) => _postJson('/api/waypoints', cfg);
 

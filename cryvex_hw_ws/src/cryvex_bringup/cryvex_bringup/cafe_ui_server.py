@@ -58,6 +58,8 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Empty, Trigger
 from tf2_ros import Buffer, TransformListener
 
+from .konum_bulucu import KonumBulucu
+
 try:
     import edge_tts  # kurulu degilse yalnizca onbellekteki cumleler calinir
     _EDGE_TTS_AVAILABLE = True
@@ -583,6 +585,15 @@ class CafeUiServerNode(Node):
             String, '/stm32_info', self._stm32_info_cb,
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
+        # Konum kalitesi + kendini bulma (bkz. konum_bulucu.py)
+        self._kb = None                  # (harita damgasi, KonumBulucu)
+        self._kb_lock = threading.Lock()
+        self._uyum = (None, 0.0)         # (oran, monotonic)
+        self._uyum_kotu_sayac = 0
+        self._son_otomatik_bul = 0.0
+        self._konum_bul_sonuc = None
+        self.create_timer(5.0, self._konum_bekcisi)
+
         self._httpd = ThreadingHTTPServer(('0.0.0.0', port), self._make_handler())
         self._http_thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._http_thread.start()
@@ -758,6 +769,111 @@ class CafeUiServerNode(Node):
         except (OSError, ValueError, KeyError, TypeError):
             return 0.0
 
+    # ---- konum kalitesi ve "Konumumu Bul" ----
+    KONUM_KAYIP_UYUM = 0.55      # bunun altinda robot yerini kaybetmis sayilir
+    KONUM_BUL_KABUL = 0.70       # bulunan konum en az bu uyumda olmali
+    KONUM_BUL_FARK = 0.10        # ve ikinci en iyi adaydan bu kadar iyi (karisiklik yok)
+
+    def _konum_bulucu(self):
+        """Kayitli haritadan KonumBulucu (harita degisince yeniden kurulur)."""
+        info = self.map_info()
+        if not info.get('width'):
+            return None
+        damga = info.get('stamp')
+        with self._kb_lock:
+            if self._kb and self._kb[0] == damga:
+                return self._kb[1]
+            w, h, pixels = _parse_pgm(os.path.join(self.maps_dir, info['image']))
+            img = np.frombuffer(pixels, dtype=np.uint8).reshape(h, w)
+            kb = KonumBulucu(img, info['resolution'], info['origin'][0], info['origin'][1])
+            self._kb = (damga, kb)
+            return kb
+
+    def _tarama_govdede(self):
+        """Son tarama noktalari robot (base_footprint) cercevesinde, Nx2 ya da None."""
+        scan = self._scan_msg
+        if scan is None or time.monotonic() - self._scan_rx > 1.0:
+            return None
+        try:
+            tf = self.tf_buffer.lookup_transform('base_footprint', scan.header.frame_id, RclpyTime())
+        except Exception:  # noqa: BLE001
+            return None
+        r = np.asarray(scan.ranges, dtype=np.float32)
+        a = scan.angle_min + scan.angle_increment * np.arange(len(r), dtype=np.float32)
+        ok = np.isfinite(r) & (r >= max(scan.range_min, 0.03)) & (r <= scan.range_max)
+        q = tf.transform.rotation
+        ly = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return np.stack([tf.transform.translation.x + r[ok] * np.cos(a[ok] + ly),
+                         tf.transform.translation.y + r[ok] * np.sin(a[ok] + ly)], axis=1)
+
+    def konum_uyumu(self):
+        """Taramanin yuzde kaci kayitli haritadaki duvarlara oturuyor (0..1) ya da None."""
+        if self.mode == 'mapping' or not self.launch_mgr.is_running('nav'):
+            return None
+        oran, t = self._uyum
+        if time.monotonic() - t < 1.0:
+            return oran
+        oran = None
+        try:
+            kb, pts = self._konum_bulucu(), self._tarama_govdede()
+            tf = self.tf_buffer.lookup_transform('map', 'base_footprint', RclpyTime())
+            if kb is not None and pts is not None:
+                q = tf.transform.rotation
+                yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+                oran = kb.uyum(pts, tf.transform.translation.x, tf.transform.translation.y, yaw)
+        except Exception:  # noqa: BLE001
+            oran = None
+        self._uyum = (oran, time.monotonic())
+        return oran
+
+    def konum_bul(self, otomatik=False):
+        """Butun haritada LiDAR taramasiyla robotu arar; emin olursa AMCL'e verir."""
+        kb, pts = self._konum_bulucu(), self._tarama_govdede()
+        if kb is None:
+            raise RuntimeError('kayıtlı harita yok')
+        if pts is None:
+            raise RuntimeError('LiDAR verisi yok')
+        t0 = time.monotonic()
+        adaylar = kb.bul(pts)
+        if not adaylar:
+            raise RuntimeError('haritada aday konum bulunamadı')
+        uyum, x, y, yaw = adaylar[0]
+        ikinci = adaylar[1][0] if len(adaylar) > 1 else 0.0
+        sonuc = {'uyum': round(uyum, 2), 'ikinci': round(ikinci, 2), 'x': round(x, 3), 'y': round(y, 3),
+                 'yaw': round(yaw, 4), 'sure_s': round(time.monotonic() - t0, 2), 'otomatik': otomatik}
+        emin = uyum >= self.KONUM_BUL_KABUL and uyum - ikinci >= self.KONUM_BUL_FARK
+        sonuc['emin'] = emin
+        if emin:
+            self.set_robot_pose(x, y, yaw, yaw_known=True)
+            self._uyum = (None, 0.0)
+        self.get_logger().info(
+            f'[KONUM BUL{" otomatik" if otomatik else ""}] en iyi %{uyum*100:.0f} @ ({x:.2f}, {y:.2f}, '
+            f'{math.degrees(yaw):.0f} der), ikinci %{ikinci*100:.0f}, {sonuc["sure_s"]} sn -> '
+            f'{"KONUM VERILDI" if emin else "emin degil, konuma dokunulmadi"}')
+        self._konum_bul_sonuc = sonuc
+        return sonuc
+
+    def _konum_bekcisi(self):
+        """5 sn'de bir: robot BOSTAYKEN 3 kez ust uste konum uyumu kotuyse kendini
+        bulur (en fazla 90 sn'de bir). Devriye/teslimat sirasinda dokunmaz."""
+        durum = (self._patrol_status or {}).get('state', '')
+        oran = self.konum_uyumu()
+        if oran is None or durum not in ('idle', ''):
+            self._uyum_kotu_sayac = 0
+            return
+        self._uyum_kotu_sayac = self._uyum_kotu_sayac + 1 if oran < self.KONUM_KAYIP_UYUM else 0
+        if self._uyum_kotu_sayac >= 3 and time.monotonic() - self._son_otomatik_bul > 90.0:
+            self._son_otomatik_bul = time.monotonic()
+            self._uyum_kotu_sayac = 0
+            self.get_logger().warn(f'Konum uyumu dusuk (%{oran*100:.0f}) - robot kendini haritada ariyor...')
+
+            def _calis():
+                try:
+                    self.konum_bul(otomatik=True)
+                except Exception as e:  # noqa: BLE001
+                    self.get_logger().warn(f'Otomatik konum bulma basarisiz: {e}')
+            threading.Thread(target=_calis, daemon=True).start()
+
     def robot_pose(self):
         """Uygulamanin kurulum ekrani robotu haritaya kendisi cizer: canli
         map->base_footprint (x, y, yaw) ya da None (konum sistemi kapali)."""
@@ -768,6 +884,9 @@ class CafeUiServerNode(Node):
         t, q = tf.transform.translation, tf.transform.rotation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         pose = {'x': round(t.x, 3), 'y': round(t.y, 3), 'yaw': round(yaw, 4)}
+        oran = self.konum_uyumu()
+        if oran is not None:
+            pose['uyum'] = round(oran, 2)   # tarama haritaya ne kadar oturuyor (0..1)
         # Nav2'nin su an izledigi yol (bkz. _plan_cb); 5 sn'den eskiyse gosterme.
         plan = getattr(self, '_plan', None)
         if plan and plan[0] and time.monotonic() - plan[1] < 5.0:
@@ -1810,6 +1929,12 @@ class CafeUiServerNode(Node):
                         self._send_json({'result': 'error', 'reason': str(e)})
                         return
                     self._send_json({'result': 'ok', 'strokes': n})
+                elif path == '/api/konum_bul':
+                    # govde: {} - robot butun haritada LiDAR'la kendini arar (~1-3 sn).
+                    try:
+                        self._send_json({'result': 'ok', **node_self.konum_bul()})
+                    except RuntimeError as e:
+                        self._send_json({'result': 'error', 'reason': str(e)})
                 elif path == '/api/set_pose':
                     # govde: {"x": m, "y": m, "yaw": rad} (harita cercevesi). yaw
                     # verilmezse/null ise robotun BILDIGI son yonelim korunur

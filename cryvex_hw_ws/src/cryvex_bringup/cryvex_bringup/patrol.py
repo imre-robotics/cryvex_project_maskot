@@ -104,10 +104,10 @@ DEPART_BACK_SECONDS = DEPART_BACK_METERS / DEPART_BACK_LIN
 #   5) ayni hedefe tekrar dene (robot artik farkli yerde/yonde -> Nav2 yeniden planlar)
 ESCAPE_SETTLE_SECONDS = 2.0
 ESCAPE_BACK_SECONDS = 1.0
-ESCAPE_TURN_SECONDS = 0.9
+ESCAPE_TURN_SECONDS = 1.8   # 2026-10-09: aci ayni (~41 derece), hiz yarida
 ESCAPE_FWD_SECONDS = 0.6
 ESCAPE_BACK_LIN = 0.12
-ESCAPE_TURN_ANG = 0.80
+ESCAPE_TURN_ANG = 0.40      # 2026-10-09: 0.80 -> ani donuste teker kayiyor, konum (AMCL) kayboluyordu
 ESCAPE_FWD_LIN = 0.10
 
 # --- Operator ekrani: canli haritalama joystick'i (STATE_TELEOP) ---
