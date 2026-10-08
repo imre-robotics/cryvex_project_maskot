@@ -433,6 +433,7 @@ flowchart LR
 | **🧭 Robot + Yön** | İki dokunuş: önce konum, sonra baktığı yön. |
 | **🖌️ Beyaz / ⬛ Siyah fırça** | Beyaz fırça haritadaki pürüzleri (yanlış engelleri) siler, siyah fırça duvar ya da yasak bölge çizer. Fırça boyu 15, 30 ya da 60 cm; geri alınabilir. Kaydedince eski harita yedeklenir ve Nav2 robotun mevcut konumuyla yeniden başlar. |
 | **Masa / Üs / Kapı** | Kurulum ekranından haritaya işaretlenir. Nav2 bu noktalara gider. |
+| **📱 Uygulamadan kurulum** | Kurulumun tamamı telefondan yapılır: "Ortamı Haritala" (joystick) ya da "Otonom Sürüş → Keşfet", ardından "🛠️ Harita Kurulumu". Bu ekranda Robot Burada, Robot + Yön, Masa / Üs / Kapı (1. dokunuş yer, 2. dokunuş yön), beyaz/siyah fırça, adlandırma ve kaydetme var. Robottaki `/setup` web sayfası yedek olarak duruyor. |
 | **📱 Canlı harita** | Telefon uygulamasının ana ekranında saniyede bir güncellenir. Mavi = robot ve yönü, kırmızı = LiDAR, sarı = planlanan yol, camgöbeği = masalar, **U** = üs, **K** = kapı. Dokununca tam ekran açılır, yakınlaştırılabilir. |
 
 ---
@@ -452,6 +453,8 @@ işlemler **operatör PIN'i** ister (PIN depoda yer almaz).
 | `/api/map.png` · `/api/map_info` | GET | Kayıtlı harita ve çözünürlük/orijin bilgisi |
 | `/api/map_edit` | POST | Fırça: `{"strokes":[{"v":"free"\|"occ","r":<px>,"pts":[[fx,fy],…]}]}` |
 | `/api/set_pose` | POST | Robot konumu. `yaw` verilmezse son bilinen yön korunur |
+| `/api/robot_pose` | GET | Robotun haritadaki konumu `{ok, x, y, yaw, mode}`; uygulamanın kurulum ekranı robotu bununla çizer |
+| `/api/otonom` | GET/POST | Otonom sürüş: GET `{calisiyor, log}`; POST `{"mod": "kesif"\|"devriye"\|"dur", "yeni": bool}` (PIN) |
 | `/api/waypoints` | GET/POST | Masa, üs ve kapı noktaları |
 | `/api/start_patrol` · `/api/stop_patrol` · `/api/go_home` | POST | Devriye kontrolü |
 | `/api/teleop` · `/api/teleop_stop` | POST | Joystick (patrol.py'nin güvenlik kilitlerinden geçer) |

@@ -758,6 +758,17 @@ class CafeUiServerNode(Node):
         except (OSError, ValueError, KeyError, TypeError):
             return 0.0
 
+    def robot_pose(self):
+        """Uygulamanin kurulum ekrani robotu haritaya kendisi cizer: canli
+        map->base_footprint (x, y, yaw) ya da None (konum sistemi kapali)."""
+        try:
+            tf = self.tf_buffer.lookup_transform('map', 'base_footprint', RclpyTime())
+        except Exception:  # noqa: BLE001
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return {'x': round(t.x, 3), 'y': round(t.y, 3), 'yaw': round(yaw, 4)}
+
     def set_robot_pose(self, x, y, yaw, yaw_known=False):
         """Kurulum ekranindaki "Robot Burada": AMCL'e kaba ipucu (±0.5m, ±30°;
         yon robotun kendi bildigi yonse ±15°).
@@ -1509,6 +1520,9 @@ class CafeUiServerNode(Node):
                     self._serve_png(png)
                 elif path == '/api/map_info':
                     self._send_json(node_self.map_info())
+                elif path == '/api/robot_pose':
+                    pose = node_self.robot_pose()
+                    self._send_json({'ok': pose is not None, **(pose or {}), 'mode': node_self.mode})
                 elif path == '/api/waypoints':
                     self._send_json(node_self.load_waypoints_cfg())
                 elif path == '/api/tts_audio':

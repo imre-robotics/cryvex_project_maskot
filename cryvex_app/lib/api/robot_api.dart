@@ -102,9 +102,34 @@ class RobotApi {
         query: '_=${DateTime.now().millisecondsSinceEpoch}').toString();
   }
 
-  /// Haritalama sonrasi manuel "Robot Burada" (2D pose estimate).
-  Future<Map<String, dynamic>> setPose(double x, double y, double yaw) =>
-      _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': yaw});
+  /// "Robot Burada" (2D pose estimate). yaw null = robotun bildigi son yon korunur.
+  Future<Map<String, dynamic>> setPose(double x, double y, [double? yaw]) =>
+      _postJson('/api/set_pose', {'x': x, 'y': y, 'yaw': ?yaw});
+
+  // ---- harita kurulumu (uygulamanin kendi ekrani: kurulum_screen.dart) ----
+  /// {resolution, origin: [x, y, theta], width, height, image}; width 0 = kayitli harita yok.
+  Future<Map<String, dynamic>> mapInfo() => _getJson('/api/map_info');
+
+  /// Kayitli haritanin PNG'si (satir 0 = ust; dunya y'si yukari).
+  Future<Uint8List?> mapPng() async {
+    try {
+      final res = await http.get(Uri.parse(mapUrl())).timeout(const Duration(seconds: 10));
+      return res.statusCode == 200 ? res.bodyBytes : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// {ok: bool, x, y, yaw, mode} - ok=false: konum sistemi kapali.
+  Future<Map<String, dynamic>> robotPose() => _getJson('/api/robot_pose');
+
+  /// {"barista": {...}|null, "door": {...}|null, "tables": [{isim, x, y, yaw}, ...]}
+  Future<Map<String, dynamic>> saveWaypoints(Map<String, dynamic> cfg) => _postJson('/api/waypoints', cfg);
+
+  /// Firca: [{"v": "free"|"occ", "r": piksel, "pts": [[fx, fy], ...]}]. Sunucu
+  /// eski haritayi yedekler ve Nav2'yi yeniden baslatir -> uzun zaman asimi.
+  Future<Map<String, dynamic>> mapEdit(List<Map<String, dynamic>> strokes) =>
+      _postJson('/api/map_edit', {'strokes': strokes}, _longOp);
 
   // ---- hoparlör sesi (0-100, robotun kendi hoparlörü - JBL vb.) ----
   Future<int> getVolume() async {

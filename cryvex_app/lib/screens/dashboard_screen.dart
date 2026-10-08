@@ -11,7 +11,7 @@ import 'connect_screen.dart';
 import 'joystick_screen.dart';
 import 'otonom_screen.dart';
 import 'panel_screen.dart';
-import 'setup_webview_screen.dart';
+import 'kurulum_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -115,7 +115,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final result = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => JoystickScreen(mode: mode)));
     if (result == true && mounted) {
       // finish_mapping sonrasi "true" doner - kuruluma yonlendir.
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SetupWebviewScreen()));
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const KurulumScreen()));
     }
   }
 
@@ -183,8 +183,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _sectionLabel('Kurulum'),
                 _actionButton('🗺️ Ortamı Haritala (Joystick ile)', CryvexButtonStyle.cyan,
                     () => _openJoystick(JoyMode.map)),
-                _actionButton('📍 Masa/Kapı Noktaları', CryvexButtonStyle.gray,
-                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SetupWebviewScreen()))),
+                _actionButton('🛠️ Harita Kurulumu (Masa · Üs · Kapı · Konum · Fırça)', CryvexButtonStyle.gray,
+                    () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const KurulumScreen()))),
                 _actionButton('📺 Bu Cihazı Robotun Dev Ekranı Yap', CryvexButtonStyle.gray, _startPanelMode),
                 const SizedBox(height: 18),
                 _sectionLabel('🎨 Robotun Görünümü'),

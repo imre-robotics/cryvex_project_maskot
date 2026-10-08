@@ -8,6 +8,7 @@ import '../state/robot_state.dart';
 import '../theme.dart';
 import '../widgets/live_map.dart';
 import '../widgets/password_sheet.dart';
+import 'kurulum_screen.dart';
 
 /// Otonom sürüş: robot haritayı kendi çıkarır (Keşfet) ya da mevcut haritada
 /// kendi dolaşır (Devriye). Robottaki ~/cryvex_araclar/otonom_gezgin.py'yi
@@ -123,7 +124,12 @@ class _OtonomScreenState extends State<OtonomScreen> {
     final res = await _api.finishMapping(kStopPassword);
     if (!mounted) return;
     setState(() => _busy = false);
-    _snack(res['result'] == 'ok' ? '✅ Harita kaydedildi' : '❌ Kaydedilemedi: ${res['reason'] ?? ''}');
+    if (res['result'] != 'ok') {
+      _snack('❌ Kaydedilemedi: ${res['reason'] ?? ''}');
+      return;
+    }
+    _snack('✅ Harita kaydedildi. Şimdi masaları, üssü ve kapıyı işaretleyin.');
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const KurulumScreen()));
   }
 
   @override
