@@ -90,38 +90,39 @@
     <origin xyz="${lidar_x} ${lidar_y} ${lidar_height}" rpy="0 0 ${lidar_yaw}"/>
   </joint>
 
-  <!-- ============ 6x HC-SR04 (STM32 -> stm32_bridge -> /ultrasonic/*) ============
-       stm32_bridge her Range mesajini frame_id = sonar_{fl,fr,rl,rr}_link ile
-       yayinlar; Nav2'nin range_layer'i (nav2_params.yaml) sonari costmap'e
-       islemek icin bu cercevelere TF ister. 2026-10-01'e kadar bu linkler
-       YOKTU -> range_layer her 2.5 sn "frame does not exist" uyarip sonarlari
-       hic kullanmiyordu.
-       Yerlesim sim'de (cryvex.urdf.xacro) test edilen duzenin aynisi: ondeki
-       iki sensor +-17 derece iceri bakar, +-20 derecelik huzmeleri TAM ONDE ust
-       uste biner (kor nokta yok); arkada da ayni.
-       OLCULER YER TUTUCU: govde kurulunca sensorlerin gercek konumunu olcup
-       asagidaki 4 property'yi guncelleyin (TF yapisi degismez). -->
-  <xacro:property name="sonar_x" value="0.30"/>     <!-- merkezden one/arkaya (m) -->
-  <xacro:property name="sonar_y" value="0.13"/>     <!-- merkezden sola/saga (m) -->
-  <xacro:property name="sonar_z" value="0.10"/>     <!-- zeminden yukseklik (m) -->
-  <xacro:property name="sonar_yaw" value="0.30"/>   <!-- ice donukluk (rad, ~17 derece) -->
+  <!-- ============ 6x HC-SR04 (STM32 1.4.0 -> stm32_bridge -> /ultrasonic/*) ============
+       stm32_bridge her Range mesajini frame_id = sonar_<ad>_link ile yayinlar;
+       Nav2'nin range katmani bu cercevelere TF ister.
+       2026-10-23 YERLESIM: govde SEKIZGEN, 6 sensor cevrede ESIT ARALIKLA (60
+       derecede bir), hepsi merkezden DISARI bakar ("on" = +x = kamera tarafi):
+                       fc 0
+             fl +60          fr -60
+             rl +120         rr -120
+                      rc 180
+       Sekizgenin kenar normalleri 0/45/90/135... derecede. 0 ve 180'deki sensor
+       kenar ortasinda (merkeze uzaklik = sekizgen_a); +-60 ve +-120'dekiler
+       45/135'lik kenarda, kose tarafina 15 derece kaymis noktada:
+       uzaklik = sekizgen_a / cos(15 derece), sensor kenara gore 15 derece
+       egik (dis bakan) takilir.
+       OLCULER YER TUTUCU: govde bitince sekizgen_a ve sonar_z'yi olcun. -->
+  <xacro:property name="sekizgen_a" value="0.26"/>   <!-- merkezden kenar ortasina (m); karsilikli kenarlar arasi / 2 -->
+  <xacro:property name="sonar_z" value="0.12"/>      <!-- zeminden yukseklik (m) -->
 
-  <xacro:macro name="sonar" params="name x y yaw">
+  <xacro:macro name="sonar" params="name aci r">
     <link name="sonar_${name}_link"/>
     <joint name="base_link_to_sonar_${name}" type="fixed">
       <parent link="base_link"/>
       <child link="sonar_${name}_link"/>
-      <origin xyz="${x} ${y} ${sonar_z}" rpy="0 0 ${yaw}"/>
+      <origin xyz="${r*cos(radians(aci))} ${r*sin(radians(aci))} ${sonar_z}" rpy="0 0 ${radians(aci)}"/>
     </joint>
   </xacro:macro>
 
-  <xacro:sonar name="fl" x="${sonar_x}"  y="${sonar_y}"  yaw="${sonar_yaw}"/>
-  <xacro:sonar name="fr" x="${sonar_x}"  y="${-sonar_y}" yaw="${-sonar_yaw}"/>
-  <xacro:sonar name="rl" x="${-sonar_x}" y="${sonar_y}"  yaw="${pi - sonar_yaw}"/>
-  <xacro:sonar name="rr" x="${-sonar_x}" y="${-sonar_y}" yaw="${-pi + sonar_yaw}"/>
-  <!-- 2026-10-23: 6 sensor (STM32 1.4.0) - on orta ve arka orta -->
-  <xacro:sonar name="fc" x="${sonar_x}"  y="0"            yaw="0"/>
-  <xacro:sonar name="rc" x="${-sonar_x}" y="0"            yaw="${pi}"/>
+  <xacro:sonar name="fc" aci="0"    r="${sekizgen_a}"/>
+  <xacro:sonar name="fl" aci="60"   r="${sekizgen_a/cos(radians(15))}"/>
+  <xacro:sonar name="rl" aci="120"  r="${sekizgen_a/cos(radians(15))}"/>
+  <xacro:sonar name="rc" aci="180"  r="${sekizgen_a}"/>
+  <xacro:sonar name="rr" aci="-120" r="${sekizgen_a/cos(radians(15))}"/>
+  <xacro:sonar name="fr" aci="-60"  r="${sekizgen_a/cos(radians(15))}"/>
 
   <!-- MPU6050 - stm32_bridge.py sadece Z ekseni acisal hizini yayinliyor,
        konum onemsiz; kart DUZ (Z yukari) monte edilmezse buraya rpy eklenmeli. -->

@@ -227,10 +227,20 @@ ECHO bölücüsü: `ECHO ─[1 kΩ]─┬─► STM32 pini`, aynı noktadan `─
 
 Pin sayımı kart **USB yukarıda** tutularak yapılır.
 
-**Montaj:**
-- Yerden 10–15 cm yüksekte. Zemini görmemesi için hafif yukarı (~5°) bakmalı.
-- Yandakiler ~15–20° içe dönük.
-- Gerçek konumlar ölçülünce URDF'teki `sonar_*` değerleri güncellenmeli.
+**Montaj (sekizgen gövde, 2026-10-23):** 6 sensör çevrede **eşit aralıkla, 60°'de bir**, hepsi merkezden **dışarı** bakar:
+
+```
+                ön orta (fc, 0°)
+     ön sol (fl, +60°)      ön sağ (fr, −60°)
+     arka sol (rl, +120°)   arka sağ (rr, −120°)
+               arka orta (rc, 180°)
+```
+
+- **fc ve rc** ön/arka kenarın ortasında, kenara dik.
+- **Diğer dördü** 45°/135°'lik kenarlarda, köşe tarafına kaymış noktada. Kenara göre **15° eğik** (dışa bakan) bir tutucuyla takılır, böylece tam 60°/120° yönüne bakar.
+- **Yükseklik** yerden 10–15 cm. Sensör hafif yukarı (~5°) baksın, zemini görmesin.
+- **URDF'te iki ölçü var:** `sekizgen_a` (merkezden kenar ortasına; şimdilik 26 cm) ve `sonar_z` (şimdilik 12 cm). Gövde bitince ölçülüp güncellenmeli.
+- **Kör bölgeler:** Her sensör ~20° genişliğinde bakar. Sensörler arasında ~40°'lik aralıklar kalır; buraları LiDAR görür, ama 36 cm'nin altında kalan şeyleri göremez.
 
 > ⚠️ **1.3.x ve öncesinde sensörler hiç ölçüm yapamıyordu.** CubeMX ayarı ECHO pinlerinde
 > yalnız yükselen kenarı açıyordu; kod ise ölçümün bittiğini düşen kenardan anlıyor.
