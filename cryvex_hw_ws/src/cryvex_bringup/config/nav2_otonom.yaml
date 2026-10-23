@@ -167,8 +167,10 @@ local_costmap:
         enabled: true
         topics:
         - /ultrasonic/fl
+        - /ultrasonic/fc
         - /ultrasonic/fr
         - /ultrasonic/rl
+        - /ultrasonic/rc
         - /ultrasonic/rr
         input_sensor_type: ALL
         clear_on_max_reading: true

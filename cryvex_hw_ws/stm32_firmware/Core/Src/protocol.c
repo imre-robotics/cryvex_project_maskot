@@ -155,13 +155,17 @@ void protocol_get_target(int32_t *linear_mm_s, int32_t *angular_mrad_s)
 
 void protocol_send_status(int32_t fl_mm, int32_t fr_mm, int32_t rl_mm, int32_t rr_mm,
                            int32_t imu_wz_mrad_s, bool estop, bool bumper,
-                           int32_t left_mm, int32_t right_mm, int32_t batt_mv)
+                           int32_t left_mm, int32_t right_mm, int32_t batt_mv,
+                           int32_t fc_mm, int32_t rc_mm)
 {
-    char buf[112];
-    int n = snprintf(buf, sizeof(buf), "S %ld %ld %ld %ld %ld %d %d %ld %ld %ld\n",
+    /* 2026-10-23 (1.4.0): FC ve RC SONA eklendi (12 alan) - eski 10 alanli
+     * satiri okuyan kopru de ilk 10'u dogru okumaya devam eder. */
+    char buf[136];
+    int n = snprintf(buf, sizeof(buf), "S %ld %ld %ld %ld %ld %d %d %ld %ld %ld %ld %ld\n",
                       (long)fl_mm, (long)fr_mm, (long)rl_mm, (long)rr_mm,
                       (long)imu_wz_mrad_s, estop ? 1 : 0, bumper ? 1 : 0,
-                      (long)left_mm, (long)right_mm, (long)batt_mv);
+                      (long)left_mm, (long)right_mm, (long)batt_mv,
+                      (long)fc_mm, (long)rc_mm);
     if (n > 0) {
         HAL_UART_Transmit(s_huart, (uint8_t *)buf, (uint16_t)n, 20);
     }

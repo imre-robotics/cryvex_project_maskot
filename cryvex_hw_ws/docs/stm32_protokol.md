@@ -53,6 +53,17 @@ yok · çift yanıp sönme = batarya düşük · saniyede bir kısa = her şey y
 S <front_l> <front_r> <back_l> <back_r> <imu_wz> <estop> <bumper> <left_mm> <right_mm> <batt_mv>\n
 ```
 
+**Yazılım 1.4.0'dan itibaren (2026-10-23)** satırın **sonuna** iki sonar daha eklenir (12 alan):
+
+```
+S <front_l> <front_r> <back_l> <back_r> <imu_wz> <estop> <bumper> <left_mm> <right_mm> <batt_mv> <front_c> <back_c>\n
+```
+
+Köprü (`stm32_bridge.py`) hem 10 hem 12 alanlı satırı okur. Eski yazılımda `fc`/`rc` yayınlanmaz.
+
+```
+```
+
 | Alan | Anlamı |
 |---|---|
 | `front_l`, `front_r`, `back_l`, `back_r` | 4× HC-SR04 mesafesi, **mm** cinsinden tam sayı (menzil dışı/okunamadı = `9999`) |

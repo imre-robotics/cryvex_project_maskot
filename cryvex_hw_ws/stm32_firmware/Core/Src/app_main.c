@@ -152,7 +152,7 @@ void app_loop(void)
         s_last_batt_mv = batt_mv;
         protocol_send_status(mm[SONAR_FL], mm[SONAR_FR], mm[SONAR_RL], mm[SONAR_RR],
                               wz, safety_estop_hit(), safety_bumper_hit(),
-                              left_mm, right_mm, batt_mv);
+                              left_mm, right_mm, batt_mv, mm[SONAR_FC], mm[SONAR_RC]);
     }
     led_update();
 }

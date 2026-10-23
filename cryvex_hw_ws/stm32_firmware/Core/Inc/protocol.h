@@ -33,7 +33,8 @@ void protocol_get_target(int32_t *linear_mm_s, int32_t *angular_mrad_s);
  * (left_mm/right_mm/batt_mv 2026-09-18'de eklendi - bkz. stm32_protokol.md). */
 void protocol_send_status(int32_t fl_mm, int32_t fr_mm, int32_t rl_mm, int32_t rr_mm,
                            int32_t imu_wz_mrad_s, bool estop, bool bumper,
-                           int32_t left_mm, int32_t right_mm, int32_t batt_mv);
+                           int32_t left_mm, int32_t right_mm, int32_t batt_mv,
+                           int32_t fc_mm, int32_t rc_mm);
 
 /* READY satirinin bilgileri (app_init'te bir kez). reset_cause sabit bir
  * dizge olmali (isaretcisi saklanir). */

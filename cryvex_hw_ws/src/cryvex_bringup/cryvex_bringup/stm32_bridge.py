@@ -53,7 +53,9 @@ except ImportError:
     serial = None  # dugum yine de acilir, seri baglanti olmadan uyarip bekler
 
 
-SONAR_ORDER = ('fl', 'fr', 'rl', 'rr')
+# 2026-10-23: yazilim 1.4.0 ile 6 sensor - fc (on orta), rc (arka orta) satirin SONUNDA.
+# Eski yazilim (10 alan) okunmaya devam eder; fc/rc o zaman yayinlanmaz.
+SONAR_ORDER = ('fl', 'fr', 'rl', 'rr', 'fc', 'rc')
 SONAR_MAX_RANGE = 4.0    # HC-SR04 datasheet (m) - Gazebo'daki 0.6 yapay sinir DEGIL
 SONAR_MIN_RANGE = 0.02
 SONAR_FOV = 0.35         # rad - cryvex.urdf.xacro'daki sonar aciklik degeriyle ayni
@@ -260,13 +262,15 @@ class Stm32Bridge(Node):
         if not line.startswith('S '):
             return
         parts = line[2:].split()
-        if len(parts) != 10:
+        if len(parts) not in (10, 12):
             return  # bozuk/yarim satir - sessizce atla, bir sonraki gelir
         try:
-            (fl, fr, rl, rr, imu_wz, estop, bumper,
-             left_mm, right_mm, batt_mv) = (int(p) for p in parts)
+            vals = [int(p) for p in parts]
         except ValueError:
             return
+        (fl, fr, rl, rr, imu_wz, estop, bumper,
+         left_mm, right_mm, batt_mv) = vals[:10]
+        sonarlar = [fl, fr, rl, rr] + vals[10:12]     # 1.4.0: + fc, rc
 
         # YON_DUZELTME: kartin sol/sag sayaclari robot 180 derece ters tanindigi
         # icin gercek tekerin tersi -> yer degistir + isaret cevir (yaw ayni kalir,
@@ -274,7 +278,7 @@ class Stm32Bridge(Node):
         left_mm, right_mm = -right_mm, -left_mm
 
         now = self.get_clock().now().to_msg()
-        for key, mm in zip(SONAR_ORDER, (fl, fr, rl, rr)):
+        for key, mm in zip(SONAR_ORDER, sonarlar):
             self._publish_range(key, mm, now)
 
         # IMU takili degilse kart 0 gonderir; bunu yayinlamak EKF'ye "robot hic

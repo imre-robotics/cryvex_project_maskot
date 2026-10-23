@@ -90,7 +90,7 @@
     <origin xyz="${lidar_x} ${lidar_y} ${lidar_height}" rpy="0 0 ${lidar_yaw}"/>
   </joint>
 
-  <!-- ============ 4x HC-SR04 (STM32 -> stm32_bridge -> /ultrasonic/*) ============
+  <!-- ============ 6x HC-SR04 (STM32 -> stm32_bridge -> /ultrasonic/*) ============
        stm32_bridge her Range mesajini frame_id = sonar_{fl,fr,rl,rr}_link ile
        yayinlar; Nav2'nin range_layer'i (nav2_params.yaml) sonari costmap'e
        islemek icin bu cercevelere TF ister. 2026-10-01'e kadar bu linkler
@@ -119,6 +119,9 @@
   <xacro:sonar name="fr" x="${sonar_x}"  y="${-sonar_y}" yaw="${-sonar_yaw}"/>
   <xacro:sonar name="rl" x="${-sonar_x}" y="${sonar_y}"  yaw="${pi - sonar_yaw}"/>
   <xacro:sonar name="rr" x="${-sonar_x}" y="${-sonar_y}" yaw="${-pi + sonar_yaw}"/>
+  <!-- 2026-10-23: 6 sensor (STM32 1.4.0) - on orta ve arka orta -->
+  <xacro:sonar name="fc" x="${sonar_x}"  y="0"            yaw="0"/>
+  <xacro:sonar name="rc" x="${-sonar_x}" y="0"            yaw="${pi}"/>
 
   <!-- MPU6050 - stm32_bridge.py sadece Z ekseni acisal hizini yayinliyor,
        konum onemsiz; kart DUZ (Z yukari) monte edilmezse buraya rpy eklenmeli. -->

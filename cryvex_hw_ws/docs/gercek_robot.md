@@ -210,7 +210,33 @@ Pi tarafında yapılan ayarlar:
 - udev kuralı `ttyAMA0`'ı `/dev/cryvex_stm32` adıyla sabitler
   ([`99-cryvex-serial.rules`](../udev_rules/99-cryvex-serial.rules)).
 
-### 4.6 LiDAR
+### 4.6 Ultrasonik sensörler (6× HC-SR04, yazılım 1.4.0)
+
+"Ön" = robotun bugünkü önü (kamera tarafı). Her sensör: **VCC → Nucleo 5V**, **GND → GND**, **TRIG → doğrudan**, **ECHO → gerilim bölücüden**.
+
+ECHO bölücüsü: `ECHO ─[1 kΩ]─┬─► STM32 pini`, aynı noktadan `─[2 kΩ]─ GND`.
+
+| Sensör | TRIG | ECHO (bölücüden) |
+|---|---|---|
+| Ön sol (fl) | PC4: CN10 **dış** sütun (kart kenarı), 17. pin | PC0 = **A5** |
+| Ön orta (fc) | PA8 = **D7** | PB5 = **D4** |
+| Ön sağ (fr) | PC5: CN10 **dış** sütun, 3. pin | PC1 = **A4** |
+| Arka sol (rl) | PC6: CN10 **dış** sütun, 2. pin | PC2: CN7 dış sütun, 18. pin |
+| Arka orta (rc) | PB0 = **A3** | PB10 = **D6** |
+| Arka sağ (rr) | PC7 = **D9** | PC3: CN7 dış sütun, 19. pin |
+
+Pin sayımı kart **USB yukarıda** tutularak yapılır.
+
+**Montaj:**
+- Yerden 10–15 cm yüksekte. Zemini görmemesi için hafif yukarı (~5°) bakmalı.
+- Yandakiler ~15–20° içe dönük.
+- Gerçek konumlar ölçülünce URDF'teki `sonar_*` değerleri güncellenmeli.
+
+> ⚠️ **1.3.x ve öncesinde sensörler hiç ölçüm yapamıyordu.** CubeMX ayarı ECHO pinlerinde
+> yalnız yükselen kenarı açıyordu; kod ise ölçümün bittiğini düşen kenardan anlıyor.
+> 1.4.0 bu pinleri `sonar_init()` içinde iki kenarlı olarak yeniden kuruyor.
+
+### 4.7 LiDAR
 
 T-mini Plus **doğrudan Pi'nin USB portuna** takılır. Beslemesiz (pasif) bir USB
 çoklayıcının arkasında LiDAR sürekli zaman aşımına düştü. Çoklayıcı gerekirse

@@ -10,7 +10,7 @@
 
 /* Yazilim surumu: acilista (ve "INFO" komutuna) READY satirinda gonderilir -
  * Pi tarafi karttaki yazilimi loglardan gorur. Her yuklemede artirin. */
-#define FW_VERSION "1.3.4"
+#define FW_VERSION "1.4.0"
 
 /* ---- Pi5 <-> STM32 haberlesme hatti (2026-10-01) ----
  * 1: USART3 - PC10 (TX) -> Pi GPIO15/RXD (pin 10), PC11 (RX) <- Pi GPIO14/TXD
@@ -86,8 +86,10 @@
                                     * LiFePO4 8S'te 23.5 V ~%5-8 kalan sarj (kayip ~%3-5 kapasite). */
 
 /* ---- HC-SR04 TRIG/ECHO pinleri (bkz. stm32_cubemx_ayarlari.md bolum 3) ---- */
-#define SONAR_COUNT 4
-typedef enum { SONAR_FL = 0, SONAR_FR = 1, SONAR_RL = 2, SONAR_RR = 3 } SonarIndex;
+/* 2026-10-23: 6 sensor. FC (on orta) ve RC (arka orta) CubeMX'te DEGIL -
+ * pinleri sonar.c'de elle kurulur (CubeMX yeniden uretimi bozmasin). */
+#define SONAR_COUNT 6
+typedef enum { SONAR_FL = 0, SONAR_FR = 1, SONAR_RL = 2, SONAR_RR = 3, SONAR_FC = 4, SONAR_RC = 5 } SonarIndex;
 
 /* Bu makrolar CubeMX'in urettigi GPIO tanimlarina (main.h) karsilik gelir -
  * CubeMX'te pinlere TAM OLARAK bu isimleri (User Label) verirseniz asagidaki

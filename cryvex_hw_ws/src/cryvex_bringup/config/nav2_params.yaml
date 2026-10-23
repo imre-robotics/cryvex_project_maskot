@@ -272,7 +272,7 @@ local_costmap:
       range_layer:
         plugin: "nav2_costmap_2d::RangeSensorLayer"
         enabled: True
-        topics: ["/ultrasonic/fl", "/ultrasonic/fr", "/ultrasonic/rl", "/ultrasonic/rr"]
+        topics: ["/ultrasonic/fl", "/ultrasonic/fc", "/ultrasonic/fr", "/ultrasonic/rl", "/ultrasonic/rc", "/ultrasonic/rr"]
         input_sensor_type: ALL
         clear_on_max_reading: True
       inflation_layer:

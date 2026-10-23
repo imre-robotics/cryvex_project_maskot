@@ -78,7 +78,7 @@ RETRY_OFFSETS = [0.0, 0.35, 0.75]     # hedef reddedilirse oda merkezine dogru k
 
 # --- Ultrasonik kurtulma (takilip kalmayi onler) ---
 # 4x HC-SR04 taban kosede; base_link'e gore yaklasik yon aci (rad).
-SONAR_YAW = {'fl': 0.30, 'fr': -0.30, 'rl': 2.84, 'rr': -2.84}
+SONAR_YAW = {'fl': 0.30, 'fr': -0.30, 'rl': 2.84, 'rr': -2.84, 'fc': 0.0, 'rc': math.pi}   # 2026-10-23: 6 sensor
 ESCAPE_TRIGGER = 0.10        # < 10 cm -> kurtulma manevrasi (fiziksel temas esigi)
 SONAR_STALE_SECONDS = 1.0    # bu suredir veri gelmeyen sensoru yok say
 STALL_ESCAPE_SECONDS = 15.0  # hedefe 15 sn ilerleme yoksa "kor" kurtulma
@@ -711,8 +711,8 @@ class SonarReader(Node):
     def blocked_sides(self):
         """Hangi taraf(lar) < ESCAPE_TRIGGER? -> (on, arka, sol, sag) bool'lari."""
         trig = {k for k, r in self._fresh().items() if r < ESCAPE_TRIGGER}
-        front = bool(trig & {'fl', 'fr'})
-        rear = bool(trig & {'rl', 'rr'})
+        front = bool(trig & {'fl', 'fr', 'fc'})
+        rear = bool(trig & {'rl', 'rr', 'rc'})
         left = bool(trig & {'fl', 'rl'})
         right = bool(trig & {'fr', 'rr'})
         return front, rear, left, right
