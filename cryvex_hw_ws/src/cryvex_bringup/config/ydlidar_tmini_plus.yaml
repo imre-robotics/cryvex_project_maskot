@@ -35,6 +35,7 @@ ydlidar_ros2_driver_node:
     angle_max: 180.0
     angle_min: -180.0
     range_max: 12.0
-    range_min: 0.03
+    range_min: 0.33   # 2026-10-23: LiDAR govde merkezinde; 33 cm icinde sadece robotun kendisi var
+                      # (4 destek ~25 cm, kablolar; sekizgen kose yaricapi 32.5 cm) - engel sanilmasin
     frequency: 7.0                 # malzeme listesi: "6-7 Hz en yogun tarama"
     invalid_range_is_inf: false

@@ -27,7 +27,7 @@
 
   <xacro:property name="footprint_radius" value="0.30"/>  <!-- 2026-10-05: tekerden tekere 59 cm olculdu (R 0.295), 0.30 korundu -->
   <xacro:property name="base_height" value="0.12"/>
-  <xacro:property name="lidar_height" value="0.36"/>  <!-- 2026-10-05: kamera eklenirken LiDAR yukseltildi, yerden 36 cm -->
+  <xacro:property name="lidar_height" value="0.30"/>  <!-- 2026-10-23: kullanici olctu - yerden 30 cm, govdenin TAM merkezinde -->
   <!-- LiDAR konumu/acisi - GECERLI DEGERLER (2026-10-05, robotta calisan kurulum):
        LiDAR kamera taretiyle birlikte YENIDEN TAKILDI; ayni zamanda robotun
        "on"u ters cevrildi (stm32_bridge.py YON_DUZELTME: ileri komutunun isareti
@@ -37,7 +37,13 @@
        Yeniden olcmek icin: docs/gercek_robot.md "LiDAR'i cetvel olarak kullanmak".
        Not: LiDAR duzlemi 36 cm'de; bunun altindaki masa ayagi tabani, kablo,
        palet alti gorulmez (bkz. docs/GUNLUK.md, ToF sensorleri planli). -->
-  <xacro:property name="lidar_x" value="0.125"/>
+  <!-- 2026-10-23: LiDAR sekizgen govdenin TAM MERKEZINDE (kullanici). Robot teker ekseni
+       ortasi (base_link) etrafinda doner; donus kaydindan (LiDAR ICP, 43 olcum, 0.8 cm artik)
+       LiDAR'in bu noktaya gore yeri x +0.135 y -0.045 bulundu -> teker ekseni govde
+       merkezinin ~13.5 cm GERISINDE. LiDAR'in 0 derecesi robotun tam SAGINA bakiyor
+       (yanlis yonde yapistirildi, kullanici dogruladi) -> yaw -90. Nav2 ayak izi bu
+       geometriden hesaplandi (nav2_params.yaml 'footprint'). -->
+  <xacro:property name="lidar_x" value="0.135"/>
   <xacro:property name="lidar_y" value="-0.045"/>
   <xacro:property name="lidar_yaw" value="${radians(-90)}"/>
 
@@ -99,13 +105,16 @@
              fl +60          fr -60
              rl +120         rr -120
                       rc 180
-       Sekizgenin kenar normalleri 0/45/90/135... derecede. 0 ve 180'deki sensor
+       Sekizgenin merkezi LiDAR'da (teker ekseninin ~13.5 cm onunde). Kenar normalleri 0/45/90/135... derecede. 0 ve 180'deki sensor
        kenar ortasinda (merkeze uzaklik = sekizgen_a); +-60 ve +-120'dekiler
        45/135'lik kenarda, kose tarafina 15 derece kaymis noktada:
        uzaklik = sekizgen_a / cos(15 derece), sensor kenara gore 15 derece
        egik (dis bakan) takilir.
        OLCULER YER TUTUCU: govde bitince sekizgen_a ve sonar_z'yi olcun. -->
-  <xacro:property name="sekizgen_a" value="0.26"/>   <!-- merkezden kenar ortasina (m); karsilikli kenarlar arasi / 2 -->
+  <xacro:property name="sekizgen_a" value="0.30"/>   <!-- 2026-10-23 olculdu: merkezden kenar ortasina 30 cm (kenar 23 cm) -->
+  <!-- Sekizgenin merkezi = LiDAR (yukarida); sensorler bu merkeze gore yerlesir. -->
+  <xacro:property name="govde_x" value="${lidar_x}"/>
+  <xacro:property name="govde_y" value="${lidar_y}"/>
   <xacro:property name="sonar_z" value="0.12"/>      <!-- zeminden yukseklik (m) -->
 
   <xacro:macro name="sonar" params="name aci r">
@@ -113,7 +122,7 @@
     <joint name="base_link_to_sonar_${name}" type="fixed">
       <parent link="base_link"/>
       <child link="sonar_${name}_link"/>
-      <origin xyz="${r*cos(radians(aci))} ${r*sin(radians(aci))} ${sonar_z}" rpy="0 0 ${radians(aci)}"/>
+      <origin xyz="${govde_x + r*cos(radians(aci))} ${govde_y + r*sin(radians(aci))} ${sonar_z}" rpy="0 0 ${radians(aci)}"/>
     </joint>
   </xacro:macro>
 
